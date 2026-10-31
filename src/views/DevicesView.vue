@@ -636,10 +636,12 @@
         align-items: stretch;
         height: calc(100vh - 56px);
         min-height: 0;
+        margin-inline: calc(-1 * var(--page-gutter));
         overflow: hidden;
     }
     .page {
         height: 100%;
+        padding-inline: var(--page-gutter);
         overflow-y: auto;
         text-align: center;
         scrollbar-width: none;
@@ -656,7 +658,7 @@
         grid-template-columns: repeat(3, 1fr);
         gap: 12px 24px;
         width: 70%;
-        max-width: 760px;
+        max-width: 900px;
         margin: 16px auto 0;
         text-align: left;
     }
@@ -676,6 +678,7 @@
     }
     .rebotActions {
         width: 60%;
+        max-width: 760px;
         display: grid;
         grid-template-columns: repeat(5, 1fr);
         align-items: center;
@@ -702,10 +705,9 @@
     }
     .modeActions {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
         gap: 10px;
         width: 70%;
-        max-width: 760px;
         margin: 12px auto 0;
     }
     .mode-action {
