@@ -2,7 +2,7 @@
 name = "cat-android-box"
 version = "0.1.0"
 description = "A desktop toolbox for Android devices"
-license = "PolyForm-Noncommercial-1.0.0"
+license = "MIT"
 authors = ["CHCAT1320"]
 edition = "2024"
 

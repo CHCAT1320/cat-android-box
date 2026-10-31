@@ -201,9 +201,6 @@ bun run tauri build
 
 ## License
 
-本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：
+本项目采用 [MIT License](LICENSE)。
 
-- 允许个人学习、研究、测试、业余项目，以及慈善、教育、公共研究、政府等非商业组织使用
-- 禁止任何商业用途；商业授权请联系 QQ 1095216448
-
-Copyright © 2026 Cat Android Box · CHCAT1320. All rights reserved.
+Copyright (c) 2026 CHCAT1320
