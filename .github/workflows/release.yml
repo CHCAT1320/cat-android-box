@@ -1,0 +1,66 @@
+name: Build and Draft Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-windows:
+    name: Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Resolve release tag
+        id: release
+        shell: pwsh
+        run: |
+          $config = Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+          $version = if ($config.version) { $config.version } else { (Get-Content package.json -Raw | ConvertFrom-Json).version }
+          "tag=v$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build and upload draft release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tauriScript: bun run tauri
+          tagName: ${{ github.event_name == 'push' && github.ref_name || steps.release.outputs.tag }}
+          releaseName: "Cat Android Box v__VERSION__"
+          releaseBody: |
+            Cat Android Box Windows installer.
+
+            - `*-setup.exe`：NSIS 安装包
+            - `*.msi`：MSI 安装包
+
+            运行环境：Windows 10 / 11（需要 WebView2，系统通常已自带）。
+
+            刷机、清空账号/用户、清除设备管理员等操作有数据丢失风险，请先备份。
+          releaseDraft: true
+          prerelease: false
