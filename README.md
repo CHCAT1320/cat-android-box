@@ -11,7 +11,8 @@
   <a href="#项目由来">项目由来</a> ·
   <a href="#快速开始">快速开始</a> ·
   <a href="#功能">功能</a> ·
-  <a href="#开发">开发</a>
+  <a href="#开发">开发</a> ·
+  <a href="#license">License</a>
 </p>
 
 ---
@@ -198,6 +199,11 @@ bun run tauri build
 - GitHub：[CHCAT1320/cat-android-box](https://github.com/CHCAT1320/cat-android-box)
 - QQ：1095216448
 
-## Copyright
+## License
+
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE)：
+
+- 允许个人学习、研究、测试、业余项目，以及慈善、教育、公共研究、政府等非商业组织使用
+- 禁止任何商业用途；商业授权请联系 QQ 1095216448
 
 Copyright © 2026 Cat Android Box · CHCAT1320. All rights reserved.
