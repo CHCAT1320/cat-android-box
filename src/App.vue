@@ -82,6 +82,15 @@ body {
   --page-gutter: clamp(16px, 2vw, 32px);
 }
 
+html {
+  scrollbar-width: none;
+}
+
+html::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .app {
   display: flex;
   flex-direction: column;
