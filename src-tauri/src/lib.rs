@@ -40,9 +40,21 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(adb::LogcatState::default())
         .invoke_handler(tauri::generate_handler![
             adb::run_device_tool,
             adb::take_screenshot,
+            adb::capture_screen,
+            adb::get_app_metadata,
+            adb::install_package,
+            adb::read_device_file,
+            adb::start_logcat,
+            adb::stop_logcat,
+            adb::backup_partition,
+            adb::record_screen,
+            adb::launch_scrcpy,
+            adb::save_text_file,
             adb::open_terminal,
             pick_file,
             pick_files,

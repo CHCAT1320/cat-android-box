@@ -34,10 +34,49 @@ Cat Android Box 是一个基于 **Tauri 2 + Vue 3 + TypeScript + Rust** 的 Andr
 ### 设备
 
 - 自动识别 ADB 设备与 FastBoot 设备，支持多设备列表与切换
-- 显示厂商、型号、代号、存储、内存、分辨率、DPI、Android 版本、Root 状态
+- 显示厂商、型号、代号、存储、内存、分辨率、DPI、Android 版本、Root 状态、电池、电池温度、序列号、CPU、IP 地址、运行时长、负载、CPU 使用率、内存占用和网络速率
 - 自动判断设备处于系统 / 恢复模式 / FastBoot
 - 页面隐藏时暂停轮询，回到页面后立即刷新
 - 退出应用（窗口叉号或 Ctrl+C）时自动停止 adb 服务
+
+### 应用管理
+
+- 列出用户应用与系统应用，显示应用名称和图标（按需从 APK 读取，不下载完整安装包）
+- 支持包名/名称搜索和类型筛选
+- 应用详情、权限查看、清除数据、强制停止
+- 安装 APK / APKS / XAPK，支持拖拽安装和批量安装
+- 卸载应用、停用 / 启用应用
+- 导出 APK 到电脑
+
+### 文件管理
+
+- 浏览手机目录，支持路径跳转和面包屑导航
+- 上传文件、批量上传到所有在线设备
+- 下载文件到电脑、重命名、删除、新建文件夹
+- 多选批量下载/复制/移动/删除
+- 图片与文本预览、当前目录搜索、目录书签
+
+### 日志
+
+- 实时 Logcat 流，支持暂停/清空
+- 按级别、关键字、PID、Tag 过滤
+- Error / Fatal 标红，Warn 标黄
+- 复制或导出日志到电脑
+
+### 屏幕与命令
+
+- 屏幕预览（约 1.2 秒刷新），支持点击、滑动、长按、返回/主页/多任务键和文本输入
+- 录制最长 180 秒屏幕并保存到电脑（界面提供 15 秒快捷录制）
+- 内置 scrcpy（v5.0.1），点击即可投屏，无需另外下载
+- 命令面板：直接执行 adb shell 命令，支持当前设备或所有在线设备
+- 保留常用命令历史，最多 20 条
+- 右侧提供 CMD / PowerShell 入口，自动把 `tools` 加入 `PATH`
+
+### 设置与更新
+
+- 主题色选择与默认下载目录
+- 环境自检：adb / fastboot 版本与设备数量
+- 基于 `tauri-plugin-updater` 的自动更新
 
 ### 快捷重启
 
@@ -83,6 +122,12 @@ Cat Android Box 是一个基于 **Tauri 2 + Vue 3 + TypeScript + Rust** 的 Andr
 - 通过 IP:端口连接新设备（`adb connect`）
 - 开启当前设备网络调试（`adb tcpip 5555`）
 - 断开网络调试连接（`adb disconnect`）
+- Android 11+ 无线配对（`adb pair`）
+
+### FastBoot 与备份
+
+- 查看 FastBoot 变量（`fastboot getvar all`）
+- 通过 root 备份任意分区为 img 文件
 
 ### 交互
 
@@ -170,12 +215,19 @@ bun run tauri build
 ```text
 .
 ├─ src/                      # 前端
+│  ├─ composables/
+│  │  └─ useConnectedDevice.ts # 新页面共用的设备轮询
 │  ├─ services/
 │  │  ├─ adb.ts              # 设备状态、输出解析、命令调用
-│  │  └─ deviceActions.ts    # 各模式功能与命令定义
+│  │  ├─ deviceActions.ts    # 各模式功能与命令定义
+│  │  └─ settings.ts         # 主题色、默认下载目录
 │  ├─ views/
 │  │  ├─ HomeView.vue        # 首页、TIPS、项目介绍
-│  │  └─ DevicesView.vue     # 设备页、设备列表、功能弹窗
+│  │  ├─ DevicesView.vue     # 设备页、设备列表、功能弹窗
+│  │  ├─ AppsView.vue        # 应用管理
+│  │  ├─ FilesView.vue       # 文件管理
+│  │  ├─ LogsView.vue        # Logcat
+│  │  └─ SettingsView.vue    # 设置、环境自检、更新
 │  ├─ App.vue                # 顶栏、路由切换动画
 │  └─ router/
 ├─ src-tauri/                # Tauri / Rust
@@ -187,6 +239,19 @@ bun run tauri build
 ├─ tools/                    # 内置 adb / fastboot
 └─ vite.config.ts            # 浏览器开发模式接口
 ```
+
+### 自动更新
+
+项目已接入 `tauri-plugin-updater`，更新源为 GitHub Releases 的 `latest.json`。
+
+1. 本地签名私钥位于 `.tauri/cat-android-box.key`（已在 `.gitignore` 中忽略），公钥已写入 `tauri.conf.json`。
+2. 在 GitHub 仓库的 Actions Secrets 中添加：
+   - `TAURI_SIGNING_PRIVATE_KEY`：私钥文件内容
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码（无密码时留空）
+3. 推送 `v*` 标签后，工作流会自动开启更新包签名并上传 `latest.json` 与 `.sig` 文件。
+4. 未配置密钥时仍可正常构建安装包，但自动更新不可用。
+
+> 私钥丢失后将无法再为已有版本发布更新，请妥善备份。
 
 ### 命令执行链路
 

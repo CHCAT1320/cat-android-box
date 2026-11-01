@@ -1,12 +1,20 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
+import { resolveAccent, settings } from "./services/settings";
 
-const colors = ["#ef4444", "#f97316", "#eab308", "#22c55e", "#3b82f6"];
-const accent = colors[Math.floor(Math.random() * colors.length)];
+const accent = ref(resolveAccent());
+
+watch(
+  () => settings.accent,
+  () => {
+    accent.value = resolveAccent();
+  },
+);
 
 const route = useRoute();
 const navRef = ref<HTMLElement | null>(null);
+const contentRef = ref<HTMLElement | null>(null);
 const indicator = ref({ left: 0, width: 0, ready: false });
 
 // 根据当前激活的菜单项计算下划线位置，切换页面时平滑滑动
@@ -32,6 +40,9 @@ function updateIndicator() {
 watch(
   () => route.path,
   () => {
+    if (contentRef.value) {
+      contentRef.value.scrollTop = 0;
+    }
     nextTick(updateIndicator);
   },
 );
@@ -54,6 +65,10 @@ onBeforeUnmount(() => {
         <nav ref="navRef" class="nav">
           <RouterLink to="/">首页</RouterLink>
           <RouterLink to="/devices">当前设备</RouterLink>
+          <RouterLink to="/apps">应用</RouterLink>
+          <RouterLink to="/files">文件</RouterLink>
+          <RouterLink to="/logs">日志</RouterLink>
+          <RouterLink to="/settings">设置</RouterLink>
           <span
             class="nav-indicator"
             aria-hidden="true"
@@ -66,7 +81,7 @@ onBeforeUnmount(() => {
         </nav>
       </div>
     </header>
-    <main class="content">
+    <main ref="contentRef" class="content">
       <RouterView v-slot="{ Component }">
         <Transition name="page" mode="out-in">
           <component :is="Component" />
@@ -83,23 +98,54 @@ body {
 }
 
 html {
-  scrollbar-width: none;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
 }
 
-html::-webkit-scrollbar {
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 163, 184, 0.55);
+  border-radius: 4px;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 116, 139, 0.75);
+}
+
+html::-webkit-scrollbar-button,
+body::-webkit-scrollbar-button,
+*::-webkit-scrollbar-button {
+  display: none;
   width: 0;
   height: 0;
+}
+
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track,
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .app {
   display: flex;
   flex-direction: column;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .topbar {
-  position: sticky;
-  top: 0;
+  position: relative;
+  flex: none;
   z-index: 10;
   height: 56px;
   background: var(--accent);
@@ -162,10 +208,13 @@ html::-webkit-scrollbar {
 
 .content {
   flex: 1;
+  min-height: 0;
   box-sizing: border-box;
   width: 100%;
   margin: 0 auto;
   padding: 0 var(--page-gutter);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .page-enter-active,

@@ -48,13 +48,26 @@ const allowedVerbs: Record<string, string[]> = {
     "devices",
     "shell",
     "install",
+    "uninstall",
     "push",
+    "pull",
     "reboot",
     "connect",
     "disconnect",
     "tcpip",
+    "pair",
+    "logcat",
+    "version",
   ],
-  fastboot: ["devices", "flash", "flashing", "reboot", "oem"],
+  fastboot: [
+    "devices",
+    "flash",
+    "flashing",
+    "reboot",
+    "oem",
+    "getvar",
+    "--version",
+  ],
 };
 
 // 与 Rust 端保持一致，只允许受支持的子命令

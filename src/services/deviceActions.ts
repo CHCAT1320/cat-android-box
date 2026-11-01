@@ -22,6 +22,8 @@ export interface DeviceAction {
   noSerial?: boolean;
   // 执行完成后刷新设备状态
   refreshAfter?: boolean;
+  // 危险操作，执行前需要用户勾选确认
+  dangerous?: boolean;
   args?: (args: ActionArgs) => string[];
 }
 
@@ -308,7 +310,20 @@ export const deviceActions: DeviceAction[] = [
   ...systemActions,
   ...recoveryActions,
   ...fastbootActions,
-];
+].map((action) =>
+  [
+    "fastboot-flash-boot",
+    "fastboot-flash-recovery",
+    "fastboot-lock",
+    "recovery-clear-admin",
+    "system-clear-admin",
+    "system-clear-accounts",
+    "system-clear-users",
+    "system-unlock-system",
+  ].includes(action.id)
+    ? { ...action, dangerous: true }
+    : action,
+);
 
 // 右侧栏的网络调试操作
 export const networkConnectAction: DeviceAction = {

@@ -1,10 +1,12 @@
 use std::fs;
 use std::io::Read;
 use std::path::PathBuf;
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Serialize;
+use tauri::{Emitter, State};
 use wait_timeout::ChildExt;
 
 // 统一命令超时，避免 push / flash 大文件被提前截断
@@ -87,13 +89,26 @@ fn allowed_verbs(tool: &str) -> &'static [&'static str] {
             "devices",
             "shell",
             "install",
+            "uninstall",
             "push",
+            "pull",
             "reboot",
             "connect",
             "disconnect",
             "tcpip",
+            "pair",
+            "logcat",
+            "version",
         ],
-        "fastboot" => &["devices", "flash", "flashing", "reboot", "oem"],
+        "fastboot" => &[
+            "devices",
+            "flash",
+            "flashing",
+            "reboot",
+            "oem",
+            "getvar",
+            "--version",
+        ],
         _ => &[],
     }
 }
@@ -161,38 +176,60 @@ fn run_command(mut command: Command, timeout: Duration) -> Result<RawOutput, Str
     })
 }
 
+// 把耗时的子进程操作放到后台线程，避免阻塞界面
+async fn run_blocking<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| format!("后台任务执行失败: {error}"))?
+}
+
 #[tauri::command]
-pub fn run_device_tool(
+pub async fn run_device_tool(
     app: tauri::AppHandle,
     tool: String,
     args: Vec<String>,
 ) -> Result<ToolOutput, String> {
-    validate_args(&tool, &args)?;
+    run_blocking(move || {
+        validate_args(&tool, &args)?;
 
-    let executable =
-        tool_executable(&app, &tool).ok_or_else(|| format!("未找到 tools/{}", tool_name(&tool)))?;
-    let mut command = build_command(executable);
-    command.args(&args);
+        let executable = tool_executable(&app, &tool)
+            .ok_or_else(|| format!("未找到 tools/{}", tool_name(&tool)))?;
+        let mut command = build_command(executable);
+        command.args(&args);
 
-    let output = run_command(command, COMMAND_TIMEOUT)?;
-    Ok(ToolOutput {
-        code: output.code,
-        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        let output = run_command(command, COMMAND_TIMEOUT)?;
+        Ok(ToolOutput {
+            code: output.code,
+            stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        })
     })
+    .await
 }
 
 // 截图并以 PNG 保存到指定目录
 #[tauri::command]
-pub fn take_screenshot(
+pub async fn take_screenshot(
     app: tauri::AppHandle,
     serial: Option<String>,
     directory: String,
 ) -> Result<String, String> {
-    let adb = tool_executable(&app, "adb").ok_or("未找到 tools/adb.exe")?;
+    run_blocking(move || take_screenshot_blocking(&app, serial.as_deref(), &directory)).await
+}
+
+fn take_screenshot_blocking(
+    app: &tauri::AppHandle,
+    serial: Option<&str>,
+    directory: &str,
+) -> Result<String, String> {
+    let adb = tool_executable(app, "adb").ok_or("未找到 tools/adb.exe")?;
 
     let mut command = build_command(adb);
-    if let Some(serial) = serial.as_deref() {
+    if let Some(serial) = serial {
         command.args(["-s", serial]);
     }
     command.args(["exec-out", "screencap", "-p"]);
@@ -207,7 +244,7 @@ pub fn take_screenshot(
         });
     }
 
-    let dir = PathBuf::from(&directory);
+    let dir = PathBuf::from(directory);
     if !dir.is_dir() {
         return Err("保存目录不存在".to_string());
     }
@@ -263,6 +300,727 @@ pub fn open_terminal(app: tauri::AppHandle, shell: String) -> Result<(), String>
         .map_err(|error| format!("启动终端失败: {error}"))?;
 
     Ok(())
+}
+
+// 抓取当前屏幕，返回可直接展示的 data URL
+#[tauri::command]
+pub async fn capture_screen(
+    app: tauri::AppHandle,
+    serial: Option<String>,
+) -> Result<String, String> {
+    run_blocking(move || capture_screen_blocking(&app, serial.as_deref())).await
+}
+
+fn capture_screen_blocking(
+    app: &tauri::AppHandle,
+    serial: Option<&str>,
+) -> Result<String, String> {
+    use base64::Engine;
+
+    let executable = tool_executable(app, "adb").ok_or("未找到 tools/adb.exe")?;
+    let mut command = build_command(executable);
+    if let Some(serial) = serial {
+        command.args(["-s", serial]);
+    }
+    command.args(["exec-out", "screencap", "-p"]);
+
+    let output = run_command(command, Duration::from_secs(30))?;
+    if output.code != Some(0) || output.stdout.is_empty() {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if message.is_empty() {
+            "截图失败".to_string()
+        } else {
+            message
+        });
+    }
+
+    let encoded = base64::engine::general_purpose::STANDARD.encode(output.stdout);
+    Ok(format!("data:image/png;base64,{encoded}"))
+}
+
+// 把文本保存到用户指定的文件（日志导出等）
+#[tauri::command]
+pub fn save_text_file(path: String, contents: String) -> Result<String, String> {
+    let target = PathBuf::from(&path);
+    if let Some(parent) = target.parent() {
+        if !parent.as_os_str().is_empty() && !parent.is_dir() {
+            return Err("保存目录不存在".to_string());
+        }
+    }
+    if target.is_dir() {
+        return Err("目标路径是目录".to_string());
+    }
+    fs::write(&target, contents.as_bytes()).map_err(|error| format!("保存文件失败: {error}"))?;
+    Ok(target.display().to_string())
+}
+
+// 在资源目录、开发目录、可执行文件旁查找指定工具
+fn find_tool_file(app: &tauri::AppHandle, name: &str) -> Option<PathBuf> {
+    use tauri::Manager;
+
+    if let Ok(resource_dir) = app.path().resource_dir() {
+        let bundled = resource_dir.join("tools").join(name);
+        if bundled.is_file() {
+            return Some(bundled);
+        }
+    }
+
+    let dev = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("tools")
+        .join(name);
+    if dev.is_file() {
+        return Some(dev);
+    }
+
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.join("tools").join(name)))
+        .filter(|candidate| candidate.is_file())
+}
+
+// 录制指定秒数的屏幕并拉回电脑
+#[tauri::command]
+pub async fn record_screen(
+    app: tauri::AppHandle,
+    serial: String,
+    directory: String,
+    seconds: u64,
+) -> Result<String, String> {
+    run_blocking(move || record_screen_blocking(&app, &serial, &directory, seconds)).await
+}
+
+fn record_screen_blocking(
+    app: &tauri::AppHandle,
+    serial: &str,
+    directory: &str,
+    seconds: u64,
+) -> Result<String, String> {
+    let adb = tool_executable(app, "adb").ok_or("未找到 tools/adb.exe")?;
+    let dir = PathBuf::from(directory);
+    if !dir.is_dir() {
+        return Err("保存目录不存在".to_string());
+    }
+
+    let seconds = seconds.clamp(1, 180);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("读取时间失败: {error}"))?
+        .as_millis();
+    let remote = format!("/sdcard/catbox-record-{timestamp}.mp4");
+
+    let mut record = build_command(adb.clone());
+    record.args([
+        "-s",
+        serial,
+        "shell",
+        "screenrecord",
+        "--time-limit",
+        &seconds.to_string(),
+        &remote,
+    ]);
+    let output = run_command(record, Duration::from_secs(seconds + 60))?;
+    if output.code != Some(0) {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if message.is_empty() {
+            "录屏失败".to_string()
+        } else {
+            message
+        });
+    }
+
+    let local = dir.join(format!("record-{timestamp}.mp4"));
+    let mut pull = build_command(adb.clone());
+    pull.args(["-s", serial, "pull", &remote, &local.display().to_string()]);
+    let pulled = run_command(pull, Duration::from_secs(180))?;
+    if pulled.code != Some(0) {
+        let message = String::from_utf8_lossy(&pulled.stderr)
+            .trim()
+            .to_string();
+        return Err(if message.is_empty() {
+            "拉取录屏文件失败".to_string()
+        } else {
+            message
+        });
+    }
+
+    let mut cleanup = build_command(adb);
+    cleanup.args(["-s", serial, "shell", "rm", "-f", &remote]);
+    let _ = run_command(cleanup, Duration::from_secs(30));
+
+    Ok(local.display().to_string())
+}
+
+// 启动内置 scrcpy 投屏
+#[tauri::command]
+pub fn launch_scrcpy(app: tauri::AppHandle, serial: Option<String>) -> Result<(), String> {
+    let executable = find_tool_file(&app, "scrcpy.exe")
+        .ok_or("未找到内置 scrcpy，请重新安装应用")?;
+    let tools = executable.parent().ok_or("scrcpy 目录不存在")?;
+
+    let mut command = Command::new(&executable);
+    if let Some(serial) = serial {
+        command.args(["-s", &serial]);
+    }
+    command.current_dir(tools);
+    command
+        .spawn()
+        .map_err(|error| format!("启动 scrcpy 失败: {error}"))?;
+    Ok(())
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppMetadata {
+    pub label: Option<String>,
+    pub icon: Option<String>,
+    pub icon_background: Option<String>,
+}
+
+// 从设备 APK 中按需读取应用名称和图标，不下载完整安装包
+#[tauri::command]
+pub async fn get_app_metadata(
+    app: tauri::AppHandle,
+    serial: String,
+    apk_path: String,
+) -> Result<AppMetadata, String> {
+    run_blocking(move || get_app_metadata_blocking(&app, &serial, &apk_path)).await
+}
+
+fn get_app_metadata_blocking(
+    app: &tauri::AppHandle,
+    serial: &str,
+    apk_path: &str,
+) -> Result<AppMetadata, String> {
+    use apk_info_axml::{ARSC, AXML};
+
+    let adb = tool_executable(app, "adb").ok_or("未找到 tools/adb.exe")?;
+
+    let manifest = adb_unzip_entry(&adb, serial, apk_path, "AndroidManifest.xml")?;
+    let arsc_bytes = adb_unzip_entry(&adb, serial, apk_path, "resources.arsc").ok();
+    let arsc = arsc_bytes
+        .as_ref()
+        .and_then(|bytes| ARSC::new(&mut bytes.as_slice()).ok());
+
+    let mut manifest_slice = manifest.as_slice();
+    let axml = AXML::new(&mut manifest_slice, arsc.as_ref())
+        .map_err(|error| format!("解析 APK 失败: {error}"))?;
+
+    let label = axml
+        .get_attribute_value("application", "label", arsc.as_ref())
+        .filter(|value| !value.starts_with('@'));
+    let mut icon_path = axml
+        .get_attribute_value("application", "icon", arsc.as_ref())
+        .filter(|value| !value.starts_with('@'));
+    let mut icon_background = None;
+    let mut basenames: Vec<String> = Vec::new();
+
+    if let Some(path) = icon_path.clone() {
+        if let Some(name) = icon_basename(&path) {
+            basenames.push(name);
+        }
+        if path.ends_with(".xml") {
+            // 自适应图标：从 XML 中取前景图和背景色
+            if let Ok(xml_bytes) = adb_unzip_entry(&adb, serial, apk_path, &path) {
+                let mut slice = xml_bytes.as_slice();
+                if let Ok(icon_xml) = AXML::new(&mut slice, arsc.as_ref()) {
+                    let foreground = icon_xml
+                        .get_attribute_value("foreground", "drawable", arsc.as_ref())
+                        .filter(|value| !value.starts_with('@'));
+                    let background = icon_xml
+                        .get_attribute_value("background", "drawable", arsc.as_ref())
+                        .filter(|value| value.starts_with('#'));
+                    icon_background = background;
+                    if let Some(foreground) = foreground {
+                        if let Some(name) = icon_basename(&foreground) {
+                            if !basenames.contains(&name) {
+                                basenames.push(name);
+                            }
+                        }
+                        icon_path = Some(foreground);
+                    } else {
+                        icon_path = None;
+                    }
+                } else {
+                    icon_path = None;
+                }
+            } else {
+                icon_path = None;
+            }
+        }
+    }
+
+    let mut icon = icon_path
+        .as_deref()
+        .and_then(|path| fetch_icon_data(&adb, serial, apk_path, path));
+
+    if icon.is_none() {
+        // 矢量/自适应/无扩展名图标回退到同名的传统位图启动图标
+        for basename in basenames {
+            icon = find_legacy_icon(&adb, serial, apk_path, &basename);
+            if icon.is_some() {
+                break;
+            }
+        }
+    }
+
+    Ok(AppMetadata {
+        label,
+        icon,
+        icon_background,
+    })
+}
+
+fn icon_basename(path: &str) -> Option<String> {
+    path.rsplit('/')
+        .next()
+        .map(|name| name.split('.').next().unwrap_or(name).to_string())
+        .filter(|name| !name.is_empty())
+}
+
+fn fetch_icon_data(
+    adb: &std::path::Path,
+    serial: &str,
+    apk_path: &str,
+    icon_path: &str,
+) -> Option<String> {
+    use base64::Engine;
+
+    let bytes = adb_unzip_entry(adb, serial, apk_path, icon_path).ok()?;
+    // APK 里的图片不一定带扩展名，按文件头判断格式
+    let mime = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        "image/png"
+    } else if bytes.len() > 12
+        && bytes.starts_with(b"RIFF")
+        && &bytes[8..12] == b"WEBP"
+    {
+        "image/webp"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else {
+        return None;
+    };
+    Some(format!(
+        "data:{mime};base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    ))
+}
+
+// 在 APK 条目里找同名的高分辨率传统图标
+fn find_legacy_icon(
+    adb: &std::path::Path,
+    serial: &str,
+    apk_path: &str,
+    basename: &str,
+) -> Option<String> {
+    let mut command = build_command(adb.to_path_buf());
+    command.args(["-s", serial, "exec-out", "unzip", "-l", apk_path]);
+    let output = run_command(command, Duration::from_secs(60)).ok()?;
+    if output.code != Some(0) {
+        return None;
+    }
+
+    let listing = String::from_utf8_lossy(&output.stdout);
+    let mut candidates: Vec<(u8, String)> = Vec::new();
+    for line in listing.lines() {
+        let path = line.split_whitespace().last().unwrap_or("");
+        if !path.starts_with("res/") || path.ends_with(".xml") {
+            continue;
+        }
+        let stem = icon_basename(path).unwrap_or_default();
+        let score = if stem == basename {
+            20
+        } else if stem == format!("{basename}_foreground") {
+            16
+        } else if stem.starts_with(basename) {
+            10
+        } else if basename.starts_with("ic_launcher")
+            && stem.contains("ic_launcher")
+        {
+            6
+        } else {
+            continue;
+        };
+        let density = if path.contains("xxxhdpi") {
+            5
+        } else if path.contains("xxhdpi") {
+            4
+        } else if path.contains("xhdpi") {
+            3
+        } else if path.contains("hdpi") {
+            2
+        } else if path.contains("mdpi") {
+            1
+        } else {
+            0
+        };
+        candidates.push((score + density, path.to_string()));
+    }
+
+    candidates.sort_by_key(|(score, _)| std::cmp::Reverse(*score));
+    for (_, path) in candidates {
+        if let Some(data) = fetch_icon_data(adb, serial, apk_path, &path) {
+            return Some(data);
+        }
+    }
+    None
+}
+
+// 通过 adb unzip -p 只取 APK 中的单个文件
+fn adb_unzip_entry(
+    adb: &std::path::Path,
+    serial: &str,
+    apk_path: &str,
+    entry: &str,
+) -> Result<Vec<u8>, String> {
+    let mut command = build_command(adb.to_path_buf());
+    command.args(["-s", serial, "exec-out", "unzip", "-p", apk_path, entry]);
+    let output = run_command(command, Duration::from_secs(60))?;
+    if output.code != Some(0) || output.stdout.is_empty() {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if message.is_empty() {
+            format!("读取 {entry} 失败")
+        } else {
+            message
+        });
+    }
+    Ok(output.stdout)
+}
+
+fn remote_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn command_text(output: RawOutput, fallback: &str) -> Result<String, String> {
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if output.code != Some(0) || stdout.contains("Failure") {
+        return Err(if !stderr.is_empty() {
+            stderr
+        } else if !stdout.is_empty() {
+            stdout
+        } else {
+            fallback.to_string()
+        });
+    }
+    Ok(if stdout.is_empty() {
+        fallback.to_string()
+    } else {
+        stdout
+    })
+}
+
+// 安装 APK / APKS / XAPK
+#[tauri::command]
+pub async fn install_package(
+    app: tauri::AppHandle,
+    serial: String,
+    path: String,
+) -> Result<String, String> {
+    run_blocking(move || install_package_blocking(&app, &serial, &path)).await
+}
+
+fn install_package_blocking(
+    app: &tauri::AppHandle,
+    serial: &str,
+    path: &str,
+) -> Result<String, String> {
+    let adb = tool_executable(app, "adb").ok_or("未找到 tools/adb.exe")?;
+
+    if path.to_lowercase().ends_with(".apk") {
+        let mut command = build_command(adb);
+        command.args(["-s", serial, "install", "-r", path]);
+        return command_text(
+            run_command(command, COMMAND_TIMEOUT)?,
+            "安装完成",
+        );
+    }
+
+    let file = fs::File::open(path).map_err(|error| format!("打开安装包失败: {error}"))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|error| format!("解析安装包失败: {error}"))?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("读取时间失败: {error}"))?
+        .as_millis();
+    let temp_dir = std::env::temp_dir().join(format!("catbox-install-{stamp}"));
+    fs::create_dir_all(&temp_dir).map_err(|error| format!("创建临时目录失败: {error}"))?;
+
+    let mut apk_files = Vec::new();
+    for index in 0..archive.len() {
+        let mut entry = match archive.by_index(index) {
+            Ok(entry) => entry,
+            Err(_) => continue,
+        };
+        let name = match entry.name() {
+            Ok(name) => name.to_string(),
+            Err(_) => continue,
+        };
+        if !name.to_lowercase().ends_with(".apk") || name.ends_with('/') {
+            continue;
+        }
+        let file_name = PathBuf::from(&name)
+            .file_name()
+            .map(|value| value.to_owned())
+            .unwrap_or_default();
+        if file_name.is_empty() {
+            continue;
+        }
+        let target = temp_dir.join(file_name);
+        let mut out = fs::File::create(&target)
+            .map_err(|error| format!("写入临时 APK 失败: {error}"))?;
+        std::io::copy(&mut entry, &mut out)
+            .map_err(|error| format!("解压 APK 失败: {error}"))?;
+        apk_files.push(target);
+    }
+
+    if apk_files.is_empty() {
+        let _ = fs::remove_dir_all(&temp_dir);
+        return Err("安装包中没有 APK 文件".to_string());
+    }
+
+    let mut command = build_command(adb);
+    command.args(["-s", serial, "install-multiple", "-r"]);
+    for file in &apk_files {
+        command.arg(file);
+    }
+    let result = run_command(command, COMMAND_TIMEOUT);
+    let _ = fs::remove_dir_all(&temp_dir);
+    command_text(result?, "安装完成")
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FilePreview {
+    pub mime: String,
+    pub data: String,
+    pub size: u64,
+}
+
+// 读取设备上的文件用于预览（限制大小）
+#[tauri::command]
+pub async fn read_device_file(
+    app: tauri::AppHandle,
+    serial: String,
+    path: String,
+    max_bytes: u64,
+) -> Result<FilePreview, String> {
+    run_blocking(move || read_device_file_blocking(&app, &serial, &path, max_bytes)).await
+}
+
+fn read_device_file_blocking(
+    app: &tauri::AppHandle,
+    serial: &str,
+    path: &str,
+    max_bytes: u64,
+) -> Result<FilePreview, String> {
+    use base64::Engine;
+
+    let adb = tool_executable(app, "adb").ok_or("未找到 tools/adb.exe")?;
+    let limit = max_bytes.clamp(1024, 20 * 1024 * 1024);
+    let quoted = remote_quote(path);
+
+    let mut stat = build_command(adb.clone());
+    stat.args([
+        "-s",
+        serial,
+        "shell",
+        &format!("stat -c %s {quoted}"),
+    ]);
+    if let Ok(output) = run_command(stat, Duration::from_secs(30)) {
+        if output.code == Some(0) {
+            let size = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u64>()
+                .unwrap_or(0);
+            if size > limit {
+                return Err(format!(
+                    "文件过大（{}），请先下载到电脑查看",
+                    format_bytes(size)
+                ));
+            }
+        }
+    }
+
+    let mut command = build_command(adb);
+    command.args(["-s", serial, "exec-out", &format!("cat {quoted}")]);
+    let output = run_command(command, Duration::from_secs(60))?;
+    if output.code != Some(0) || output.stdout.is_empty() {
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if message.is_empty() {
+            "读取文件失败".to_string()
+        } else {
+            message
+        });
+    }
+
+    let bytes = output.stdout;
+    let size = bytes.len() as u64;
+    let mime = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
+        "image/png"
+    } else if bytes.len() > 12 && bytes.starts_with(b"RIFF") && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"GIF8") {
+        "image/gif"
+    } else {
+        "text/plain"
+    };
+
+    Ok(FilePreview {
+        mime: mime.to_string(),
+        data: base64::engine::general_purpose::STANDARD.encode(bytes),
+        size,
+    })
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 4] = ["KB", "MB", "GB", "TB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+    let mut value = bytes as f64 / 1024.0;
+    let mut index = 0;
+    while value >= 1024.0 && index < UNITS.len() - 1 {
+        value /= 1024.0;
+        index += 1;
+    }
+    format!("{value:.1} {}", UNITS[index])
+}
+
+#[derive(Default)]
+pub struct LogcatState(pub Mutex<Option<Child>>);
+
+fn stop_logcat_inner(state: &LogcatState) {
+    if let Ok(mut guard) = state.0.lock() {
+        if let Some(mut child) = guard.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+#[tauri::command]
+pub fn start_logcat(
+    app: tauri::AppHandle,
+    state: State<'_, LogcatState>,
+    serial: String,
+) -> Result<(), String> {
+    stop_logcat_inner(&state);
+
+    let adb = tool_executable(&app, "adb").ok_or("未找到 tools/adb.exe")?;
+    let mut command = build_command(adb);
+    command
+        .args(["-s", &serial, "logcat", "-v", "time"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("启动 Logcat 失败: {error}"))?;
+    let stdout = child.stdout.take().ok_or("无法读取 Logcat 输出")?;
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        use std::io::{BufRead, BufReader};
+        let reader = BufReader::new(stdout);
+        for line in reader.lines().map_while(Result::ok) {
+            let _ = handle.emit("logcat-line", line);
+        }
+    });
+
+    let mut guard = state.0.lock().map_err(|_| "Logcat 状态锁失败")?;
+    *guard = Some(child);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn stop_logcat(state: State<'_, LogcatState>) -> Result<(), String> {
+    stop_logcat_inner(&state);
+    Ok(())
+}
+
+// 通过 root 备份分区为 img 文件并拉回电脑
+#[tauri::command]
+pub async fn backup_partition(
+    app: tauri::AppHandle,
+    serial: String,
+    partition: String,
+    directory: String,
+) -> Result<String, String> {
+    run_blocking(move || {
+        backup_partition_blocking(&app, &serial, &partition, &directory)
+    })
+    .await
+}
+
+fn backup_partition_blocking(
+    app: &tauri::AppHandle,
+    serial: &str,
+    partition: &str,
+    directory: &str,
+) -> Result<String, String> {
+    if partition.is_empty()
+        || !partition
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '-')
+    {
+        return Err("分区名只能包含字母、数字、下划线和短横线".to_string());
+    }
+    let dir = PathBuf::from(directory);
+    if !dir.is_dir() {
+        return Err("保存目录不存在".to_string());
+    }
+
+    let adb = tool_executable(app, "adb").ok_or("未找到 tools/adb.exe")?;
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| format!("读取时间失败: {error}"))?
+        .as_millis();
+    let remote = format!("/sdcard/catbox-{partition}-{stamp}.img");
+
+    let mut dump = build_command(adb.clone());
+    dump.args([
+        "-s",
+        serial,
+        "shell",
+        &format!(
+            "su -c 'dd if=/dev/block/by-name/{partition} of={remote}'"
+        ),
+    ]);
+    let output = run_command(dump, Duration::from_secs(300))?;
+    if output.code != Some(0) {
+        let message = String::from_utf8_lossy(&output.stderr)
+            .trim()
+            .to_string();
+        return Err(if message.is_empty() {
+            "备份失败，请确认设备已 root".to_string()
+        } else {
+            message
+        });
+    }
+
+    let local = dir.join(format!("{partition}-{stamp}.img"));
+    let mut pull = build_command(adb.clone());
+    pull.args(["-s", serial, "pull", &remote, &local.display().to_string()]);
+    let pulled = run_command(pull, Duration::from_secs(300))?;
+
+    if pulled.code != Some(0) {
+        let message = String::from_utf8_lossy(&pulled.stderr)
+            .trim()
+            .to_string();
+        return Err(if message.is_empty() {
+            "拉取备份文件失败".to_string()
+        } else {
+            message
+        });
+    }
+
+    let mut cleanup = build_command(adb);
+    cleanup.args(["-s", serial, "shell", "rm", "-f", &remote]);
+    let _ = run_command(cleanup, Duration::from_secs(30));
+
+    Ok(local.display().to_string())
 }
 
 // 停止 adb 服务，避免程序退出后后台残留 adb 进程

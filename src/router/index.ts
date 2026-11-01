@@ -15,7 +15,31 @@ const router = createRouter({
       name: "devices",
       component: () => import("../views/DevicesView.vue"),
       meta: { title: "当前设备" },
-    }
+    },
+    {
+      path: "/apps",
+      name: "apps",
+      component: () => import("../views/AppsView.vue"),
+      meta: { title: "应用管理" },
+    },
+    {
+      path: "/files",
+      name: "files",
+      component: () => import("../views/FilesView.vue"),
+      meta: { title: "文件管理" },
+    },
+    {
+      path: "/logs",
+      name: "logs",
+      component: () => import("../views/LogsView.vue"),
+      meta: { title: "日志" },
+    },
+    {
+      path: "/settings",
+      name: "settings",
+      component: () => import("../views/SettingsView.vue"),
+      meta: { title: "设置" },
+    },
   ],
 });
 
