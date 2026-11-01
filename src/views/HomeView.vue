@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { version } from "../../package.json";
 
 const GITHUB_URL = "https://github.com/CHCAT1320/cat-android-box";
 
@@ -386,7 +387,8 @@ onBeforeUnmount(() => {
     </div>
 
     <p class="copyright">
-      Copyright © 2026 Cat Android Box · CHCAT1320. All rights reserved.
+      Cat Android Box v{{ version }} · Copyright © 2026 CHCAT1320. All rights
+      reserved.
     </p>
   </section>
 </template>
