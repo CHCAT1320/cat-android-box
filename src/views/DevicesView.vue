@@ -152,6 +152,24 @@
                     </div>
                 </div>
             </div>
+            <div v-if="showTerminalHelp" class="dialog-mask" @click.self="showTerminalHelp = false">
+                <div class="dialog" role="dialog" aria-modal="true">
+                    <h2>命令行</h2>
+                    <p class="help-text">
+                        CMD 和 PowerShell 会分别打开一个新的命令行窗口，并自动把
+                        tools 目录加入 PATH。你可以直接输入 adb、fastboot
+                        等命令，操作结果会显示在窗口里。
+                    </p>
+                    <div class="dialog-actions">
+                        <button
+                            class="dialog-confirm"
+                            @click="showTerminalHelp = false"
+                        >
+                            知道了
+                        </button>
+                    </div>
+                </div>
+            </div>
         </section>
 
         <aside class="sidebar">
@@ -200,6 +218,39 @@
                     断开当前设备网络连接
                 </button>
             </div>
+            <div class="sidebar-divider"></div>
+            <div class="sidebar-terminal">
+                <div class="terminal-title">
+                    <span>命令行</span>
+                    <button
+                        class="terminal-help"
+                        type="button"
+                        aria-label="命令行说明"
+                        @click="showTerminalHelp = true"
+                    >
+                        ?
+                    </button>
+                </div>
+                <div class="terminal-actions">
+                    <button
+                        class="terminal-button"
+                        :disabled="!runningInTauri"
+                        @click="launchTerminal('cmd')"
+                    >
+                        CMD
+                    </button>
+                    <button
+                        class="terminal-button"
+                        :disabled="!runningInTauri"
+                        @click="launchTerminal('powershell')"
+                    >
+                        PowerShell
+                    </button>
+                </div>
+                <p v-if="terminalError" class="terminal-error">
+                    {{ terminalError }}
+                </p>
+            </div>
         </aside>
     </div>
 </template>
@@ -208,6 +259,7 @@
     import {
         getDeviceInfo,
         getDeviceStatus,
+        openTerminal,
         pickDirectory,
         pickFile,
         pickFiles,
@@ -326,6 +378,19 @@
     const pending = ref<RebootAction | null>(null);
     const rebooting = ref(false);
     const rebootError = ref("");
+    const terminalError = ref("");
+    const showTerminalHelp = ref(false);
+
+    // 打开带 tools 目录的交互式终端
+    async function launchTerminal(shell: "cmd" | "powershell") {
+        terminalError.value = "";
+        try {
+            await openTerminal(shell);
+        } catch (error) {
+            terminalError.value =
+                error instanceof Error ? error.message : "打开终端失败";
+        }
+    }
 
     async function refresh() {
         if (refreshing) {
@@ -432,7 +497,11 @@
         rebooting.value = true;
         rebootError.value = "";
         try {
-            await rebootDevice(activeSerial.value, pending.value.mode);
+            await rebootDevice(
+                activeSerial.value,
+                pending.value.mode,
+                deviceMode.value === "fastboot",
+            );
             pending.value = null;
         } catch (error) {
             rebootError.value =
@@ -833,6 +902,75 @@
         color: var(--accent);
         opacity: 0.3;
         cursor: not-allowed;
+    }
+    .sidebar-terminal {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        padding: 16px 20px;
+    }
+    .terminal-title {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        color: var(--accent);
+        font-size: 13px;
+        font-weight: 600;
+        text-align: center;
+    }
+    .terminal-help {
+        display: grid;
+        place-items: center;
+        width: 16px;
+        height: 16px;
+        padding: 0;
+        border: 1px solid currentColor;
+        border-radius: 50%;
+        background: none;
+        color: var(--accent);
+        font-family: inherit;
+        font-size: 11px;
+        line-height: 1;
+        cursor: pointer;
+    }
+    .terminal-help:hover {
+        background: rgba(59, 130, 246, 0.08);
+    }
+    .help-text {
+        line-height: 1.6;
+        text-align: left;
+    }
+    .terminal-actions {
+        display: flex;
+        gap: 10px;
+    }
+    .terminal-button {
+        flex: 1;
+        padding: 8px 6px;
+        border: 1px solid #e5e7eb;
+        background: #fff;
+        color: var(--accent);
+        font-family: inherit;
+        font-size: 13px;
+        cursor: pointer;
+        transition: border-color 0.15s ease, background-color 0.15s ease;
+    }
+    .terminal-button:hover:not(:disabled) {
+        border-color: var(--accent);
+    }
+    .terminal-button:active:not(:disabled) {
+        background: #e5e7eb;
+    }
+    .terminal-button:disabled {
+        opacity: 0.4;
+        cursor: not-allowed;
+    }
+    .terminal-error {
+        margin: 0;
+        color: #dc2626;
+        font-size: 12px;
+        text-align: center;
     }
     .dialog-mask {
         position: fixed;

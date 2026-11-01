@@ -105,12 +105,9 @@ function normalizeBootMode(rawMode: string, bootCompleted: string): DeviceMode {
     case "system":
     case "android":
       return "system";
-    case "":
-    case "unknown":
-      // 部分设备的 ro.bootmode 固定返回 unknown，用开机完成标记兜底
-      return bootCompleted.trim() === "1" ? "system" : "unknown";
     default:
-      return "unknown";
+      // 部分设备的 ro.bootmode 会返回 unknown、wdgreboot 等厂商值，用开机完成标记兜底
+      return bootCompleted.trim() === "1" ? "system" : "unknown";
   }
 }
 
@@ -251,18 +248,32 @@ export async function getDeviceInfo(serial: string): Promise<DeviceInfo> {
 export async function rebootDevice(
   serial: string | null,
   mode: RebootMode,
+  fastboot = false,
 ): Promise<void> {
-  const args = [
-    ...(serial ? ["-s", serial] : []),
-    "reboot",
-    ...(mode ? [mode] : []),
-  ];
-  const result = await runDeviceTool("adb", args);
+  const args = fastboot
+    ? [
+        ...(serial ? ["-s", serial] : []),
+        ...(mode === "edl"
+          ? ["oem", "edl"]
+          : ["reboot", ...(mode ? [mode] : [])]),
+      ]
+    : [...(serial ? ["-s", serial] : []), "reboot", ...(mode ? [mode] : [])];
+  const result = await runDeviceTool(fastboot ? "fastboot" : "adb", args);
   if (result.code !== 0) {
     throw new Error(
       (result.stderr || result.stdout).trim() || "重启失败",
     );
   }
+}
+
+// 打开带 tools 目录的 CMD / PowerShell 窗口
+export async function openTerminal(
+  shell: "cmd" | "powershell",
+): Promise<void> {
+  if (!inTauri) {
+    throw new Error("仅桌面应用支持打开终端");
+  }
+  await invoke("open_terminal", { shell });
 }
 
 // 截图并保存到电脑上的指定目录

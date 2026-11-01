@@ -43,6 +43,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             adb::run_device_tool,
             adb::take_screenshot,
+            adb::open_terminal,
             pick_file,
             pick_files,
             pick_directory

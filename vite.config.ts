@@ -54,7 +54,7 @@ const allowedVerbs: Record<string, string[]> = {
     "disconnect",
     "tcpip",
   ],
-  fastboot: ["devices", "flash", "flashing"],
+  fastboot: ["devices", "flash", "flashing", "reboot", "oem"],
 };
 
 // 与 Rust 端保持一致，只允许受支持的子命令

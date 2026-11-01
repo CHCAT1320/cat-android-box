@@ -93,7 +93,7 @@ fn allowed_verbs(tool: &str) -> &'static [&'static str] {
             "disconnect",
             "tcpip",
         ],
-        "fastboot" => &["devices", "flash", "flashing"],
+        "fastboot" => &["devices", "flash", "flashing", "reboot", "oem"],
         _ => &[],
     }
 }
@@ -220,6 +220,49 @@ pub fn take_screenshot(
     fs::write(&file, output.stdout).map_err(|error| format!("保存截图失败: {error}"))?;
 
     Ok(file.display().to_string())
+}
+
+// 打开交互式终端，并把 tools 目录加入 PATH，方便直接调用 adb / fastboot
+#[tauri::command]
+pub fn open_terminal(app: tauri::AppHandle, shell: String) -> Result<(), String> {
+    let executable = tool_executable(&app, "adb").ok_or("未找到 tools/adb.exe")?;
+    let tools = executable.parent().ok_or("tools 目录不存在")?;
+
+    let mut paths = vec![tools.to_path_buf()];
+    if let Some(path) = std::env::var_os("PATH") {
+        paths.extend(std::env::split_paths(&path));
+    }
+    let path =
+        std::env::join_paths(paths).map_err(|error| format!("设置 PATH 失败: {error}"))?;
+
+    let mut command = if shell == "powershell" {
+        let mut command = Command::new("powershell.exe");
+        command.args([
+            "-NoExit",
+            "-Command",
+            "$host.UI.RawUI.WindowTitle = 'Cat Android Box'",
+        ]);
+        command
+    } else {
+        let mut command = Command::new("cmd.exe");
+        command.args(["/K", "title Cat Android Box"]);
+        command
+    };
+
+    command.current_dir(tools).env("PATH", path);
+
+    // 开发模式下父进程带有控制台，必须新建控制台，避免命令混入启动它的终端
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0000_0010);
+    }
+
+    command
+        .spawn()
+        .map_err(|error| format!("启动终端失败: {error}"))?;
+
+    Ok(())
 }
 
 // 停止 adb 服务，避免程序退出后后台残留 adb 进程
