@@ -58,6 +58,8 @@ const allowedVerbs: Record<string, string[]> = {
     "pair",
     "logcat",
     "version",
+    "kill-server",
+    "start-server",
   ],
   fastboot: [
     "devices",

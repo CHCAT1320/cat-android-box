@@ -1692,6 +1692,7 @@
     onMounted(() => {
         startPolling();
         document.addEventListener("visibilitychange", handleVisibilityChange);
+        window.addEventListener("pagehide", stopPolling);
     });
 
     onBeforeUnmount(() => {
@@ -1701,6 +1702,7 @@
             "visibilitychange",
             handleVisibilityChange,
         );
+        window.removeEventListener("pagehide", stopPolling);
     });
 </script>
 <style scoped>

@@ -774,6 +774,15 @@ export async function getToolVersions(): Promise<{
   };
 }
 
+// 重启 adb 服务，用于连接异常后的恢复
+export async function restartAdb(): Promise<string> {
+  await runDeviceTool("adb", ["kill-server"]);
+  const result = await runDeviceTool("adb", ["start-server"]);
+  return (
+    (result.stdout || result.stderr).trim() || "ADB 服务已重启"
+  );
+}
+
 export async function saveTextFile(
   path: string,
   contents: string,

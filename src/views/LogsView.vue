@@ -25,7 +25,8 @@ const autoScroll = ref(true);
 const error = ref("");
 const message = ref("");
 const logBox = ref<HTMLElement | null>(null);
-const MAX_LINES = 5000;
+const MAX_LINES = 3000;
+const MAX_RENDER_LINES = 800;
 
 let unlisten: (() => void) | null = null;
 let fallbackTimer: number | undefined;
@@ -70,6 +71,10 @@ const filteredLines = computed(() => {
   });
 });
 
+const visibleLines = computed(() =>
+  filteredLines.value.slice(-MAX_RENDER_LINES),
+);
+
 function levelClass(line: string) {
   const value = parseLine(line).level;
   if (value === "E" || value === "F") {
@@ -81,8 +86,11 @@ function levelClass(line: string) {
   return "";
 }
 
-function appendLine(line: string) {
-  rawLines.value.push(line);
+function appendBatch(batch: string[]) {
+  if (batch.length === 0) {
+    return;
+  }
+  rawLines.value.push(...batch);
   if (rawLines.value.length > MAX_LINES) {
     rawLines.value.splice(0, rawLines.value.length - MAX_LINES);
   }
@@ -125,8 +133,8 @@ async function start() {
   }
 
   try {
-    unlisten = await listen<string>("logcat-line", (event) => {
-      appendLine(event.payload);
+    unlisten = await listen<string[]>("logcat-batch", (event) => {
+      appendBatch(event.payload);
     });
     await startLogcat(target);
   } catch (caught) {
@@ -214,7 +222,14 @@ watch(
 
 onBeforeUnmount(() => {
   void stop();
+  window.removeEventListener("pagehide", handlePageHide);
 });
+
+function handlePageHide() {
+  void stop();
+}
+
+window.addEventListener("pagehide", handlePageHide);
 </script>
 
 <template>
@@ -279,19 +294,20 @@ onBeforeUnmount(() => {
 
     <div v-else ref="logBox" class="log-output">
       <div
-        v-for="(line, index) in filteredLines"
+        v-for="(line, index) in visibleLines"
         :key="index"
         class="log-line"
         :class="levelClass(line)"
       >
         {{ line }}
       </div>
-      <p v-if="filteredLines.length === 0" class="log-placeholder">
+      <p v-if="visibleLines.length === 0" class="log-placeholder">
         {{ streaming ? "等待日志..." : "点击「开始实时」后显示日志" }}
       </p>
     </div>
     <p class="log-meta">
-      已显示 {{ filteredLines.length }} / {{ rawLines.length }} 行
+      显示 {{ visibleLines.length }} / 筛选 {{ filteredLines.length }} / 共
+      {{ rawLines.length }} 行
     </p>
   </section>
 </template>

@@ -99,6 +99,8 @@ fn allowed_verbs(tool: &str) -> &'static [&'static str] {
             "pair",
             "logcat",
             "version",
+            "kill-server",
+            "start-server",
         ],
         "fastboot" => &[
             "devices",
@@ -920,12 +922,55 @@ pub fn start_logcat(
         .map_err(|error| format!("启动 Logcat 失败: {error}"))?;
     let stdout = child.stdout.take().ok_or("无法读取 Logcat 输出")?;
 
-    let handle = app.clone();
+    // 读线程只负责读，批量线程每 300ms 合并一次事件，避免高频日志冲垮前端
+    let (sender, receiver) = std::sync::mpsc::sync_channel::<String>(8192);
     std::thread::spawn(move || {
         use std::io::{BufRead, BufReader};
         let reader = BufReader::new(stdout);
         for line in reader.lines().map_while(Result::ok) {
-            let _ = handle.emit("logcat-line", line);
+            if sender.send(line).is_err() {
+                break;
+            }
+        }
+    });
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        use std::sync::mpsc::RecvTimeoutError;
+        use std::time::{Duration, Instant};
+
+        let mut batch: Vec<String> = Vec::new();
+        let mut last_emit = Instant::now();
+        loop {
+            match receiver.recv_timeout(Duration::from_millis(300)) {
+                Ok(line) => {
+                    batch.push(line);
+                    if batch.len() >= 300
+                        || last_emit.elapsed() >= Duration::from_millis(300)
+                    {
+                        let _ = handle.emit(
+                            "logcat-batch",
+                            std::mem::take(&mut batch),
+                        );
+                        last_emit = Instant::now();
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if !batch.is_empty() {
+                        let _ = handle.emit(
+                            "logcat-batch",
+                            std::mem::take(&mut batch),
+                        );
+                        last_emit = Instant::now();
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    if !batch.is_empty() {
+                        let _ = handle.emit("logcat-batch", batch);
+                    }
+                    break;
+                }
+            }
         }
     });
 

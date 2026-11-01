@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { getDeviceStatus, getToolVersions, pickDirectory } from "../services/adb";
+import { getDeviceStatus, getToolVersions, pickDirectory, restartAdb } from "../services/adb";
 import { ACCENT_COLORS, settings } from "../services/settings";
 import { version } from "../../package.json";
 
@@ -10,6 +10,23 @@ const envAdb = ref("");
 const envFastboot = ref("");
 const envDevices = ref("");
 const envError = ref("");
+const restartingAdb = ref(false);
+const adbMessage = ref("");
+
+async function restartAdbService() {
+  restartingAdb.value = true;
+  envError.value = "";
+  adbMessage.value = "";
+  try {
+    adbMessage.value = await restartAdb();
+    await checkEnvironment();
+  } catch (caught) {
+    envError.value =
+      caught instanceof Error ? caught.message : "重启 ADB 失败";
+  } finally {
+    restartingAdb.value = false;
+  }
+}
 
 const updateState = ref<"idle" | "checking" | "current" | "found" | "error">(
   "idle",
@@ -141,7 +158,15 @@ async function openReleases() {
       <button :disabled="checkingEnv" @click="checkEnvironment">
         {{ checkingEnv ? "检测中..." : "开始检测" }}
       </button>
+      <button
+        class="secondary"
+        :disabled="restartingAdb"
+        @click="restartAdbService"
+      >
+        {{ restartingAdb ? "重启中..." : "重启 ADB 服务" }}
+      </button>
       <p v-if="envError" class="error">{{ envError }}</p>
+      <p v-if="adbMessage" class="adb-message">{{ adbMessage }}</p>
       <div v-if="envAdb || envFastboot" class="env-result">
         <p><span>adb</span>{{ envAdb }}</p>
         <p><span>fastboot</span>{{ envFastboot }}</p>
@@ -265,6 +290,9 @@ async function openReleases() {
   .card > button:hover:not(:disabled) {
     background: rgba(59, 130, 246, 0.08);
   }
+  .card > button + button {
+    margin-left: 8px;
+  }
   .row button:disabled,
   .card > button:disabled {
     opacity: 0.4;
@@ -273,6 +301,11 @@ async function openReleases() {
   .secondary {
     border-color: #d1d5db !important;
     color: #374151 !important;
+  }
+  .adb-message {
+    margin: 10px 0 0;
+    color: #166534;
+    font-size: 13px;
   }
   .env-result {
     margin-top: 12px;

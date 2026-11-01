@@ -107,14 +107,20 @@ export function useConnectedDevice(): ConnectedDevice {
     }
   }
 
+  function handlePageHide() {
+    stop();
+  }
+
   onMounted(() => {
     start();
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
   });
 
   onBeforeUnmount(() => {
     stop();
     document.removeEventListener("visibilitychange", handleVisibilityChange);
+    window.removeEventListener("pagehide", handlePageHide);
   });
 
   return {
