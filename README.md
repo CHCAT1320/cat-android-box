@@ -4,205 +4,218 @@
 
 <h1 align="center">Cat Android Box</h1>
 
-<p align="center">面向 Android 设备的 Windows 桌面工具箱</p>
+<p align="center">A Windows desktop toolbox for Android devices</p>
+
+<p align="center">
+  English · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
 <p align="center">
   <a href="https://github.com/CHCAT1320/cat-android-box">GitHub</a> ·
-  <a href="#项目由来">项目由来</a> ·
-  <a href="#快速开始">快速开始</a> ·
-  <a href="#功能">功能</a> ·
-  <a href="#开发">开发</a> ·
+  <a href="#origin">Origin</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#features">Features</a> ·
+  <a href="#development">Development</a> ·
   <a href="#license">License</a>
 </p>
 
 ---
 
-Cat Android Box 是一个基于 **Tauri 2 + Vue 3 + TypeScript + Rust** 的 Android 设备工具箱，内置 `adb` 与 `fastboot`，连接手机后即可在同一个窗口里完成设备信息查看、多设备切换、快捷重启、安装 APK、文件推送、截图、网络调试等操作。
+Cat Android Box is an Android device toolbox built with **Tauri 2 + Vue 3 + TypeScript + Rust**. It bundles `adb` and `fastboot`, so once a phone is connected you can inspect device information, switch between devices, reboot, install APKs, push files, take screenshots, debug over the network, and more — all in one window.
 
-所有命令都在本机执行，不经过任何服务器；执行结果会在弹窗中显示，并可一键复制。
+Every command runs locally; nothing is sent to a server. Results are shown in a dialog and can be copied with one click.
 
-## 项目由来
+## Origin
 
-[AutumnBox（秋之盒）](https://github.com/zsh2401/AutumnBox) 是一个优秀的图形化 ADB 工具箱，但原项目已经归档，不再继续维护。为了让类似的设备管理体验继续存在，Cat Android Box 作为替代品诞生，并在界面结构与功能组织上借鉴了 AutumnBox 的思路。
+[AutumnBox](https://github.com/zsh2401/AutumnBox) is an excellent graphical ADB toolbox, but the original project has been archived and is no longer maintained. Cat Android Box was created as a replacement to keep a similar device-management experience alive, taking inspiration from AutumnBox for its interface structure and feature organization.
 
-本项目使用 Tauri + Vue 3 + Rust 重新实现，除保留设备连接、模式识别、DPM / 脚本激活、刷机等常见能力外，还补充了多设备切换、主题化界面、可复制的命令输出等交互。
+This project is a fresh implementation with Tauri, Vue 3, and Rust. In addition to device connection, mode detection, DPM / script activation, and flashing tools, it adds multi-device switching, theming, copyable command output, and other quality-of-life features.
 
-感谢 AutumnBox 及其作者为这个领域做出的贡献。
+Thanks to AutumnBox and its author for their contributions to this space.
 
-## 功能
+## Features
 
-### 设备
+### Devices
 
-- 自动识别 ADB 设备与 FastBoot 设备，支持多设备列表与切换
-- 显示厂商、型号、代号、存储、内存、分辨率、DPI、Android 版本、Root 状态、电池、电池温度、序列号、CPU、IP 地址、运行时长、负载、CPU 使用率、内存占用和网络速率
-- 自动判断设备处于系统 / 恢复模式 / FastBoot
-- 页面隐藏时暂停轮询，回到页面后立即刷新
-- 退出应用（窗口叉号或 Ctrl+C）时自动停止 adb 服务
+- Detects ADB and FastBoot devices automatically; supports a multi-device list and switching
+- Shows manufacturer, model, codename, storage, memory, resolution, DPI, Android version, root status, battery, battery temperature, serial number, CPU, IP address, uptime, load, CPU usage, memory usage, and network rate
+- Detects whether the device is in system / recovery / FastBoot mode
+- Pauses polling when the page is hidden and refreshes immediately when it returns
+- Stops the adb server automatically when the app exits (window close or Ctrl+C)
 
-### 应用管理
+### App management
 
-- 列出用户应用与系统应用，显示应用名称和图标（按需从 APK 读取，不下载完整安装包）
-- 支持包名/名称搜索和类型筛选
-- 应用详情、权限查看、清除数据、强制停止
-- 安装 APK / APKS / XAPK，支持拖拽安装和批量安装
-- 卸载应用、停用 / 启用应用
-- 导出 APK 到电脑
+- Lists user and system apps with real names and icons (read from the APK on demand; the full installer is not downloaded)
+- Search by package name or app name, plus type filtering
+- App details, permissions with Chinese descriptions, clear data, force stop
+- Install APK / APKS / XAPK; drag-and-drop and batch installation
+- Uninstall, disable, or enable apps
+- Export APKs to the PC
 
-### 文件管理
+### File management
 
-- 浏览手机目录，支持路径跳转和面包屑导航
-- 上传文件、批量上传到所有在线设备
-- 下载文件到电脑、重命名、删除、新建文件夹
-- 多选批量下载/复制/移动/删除
-- 图片与文本预览、当前目录搜索、目录书签
+- Browse device directories with path navigation and breadcrumbs
+- Upload files, or upload in batch to every online device
+- Download, rename, delete, and create folders
+- Multi-select batch download / copy / move / delete
+- Image and text previews, current-directory search, and directory bookmarks
 
-### 日志
+### Logs
 
-- 实时 Logcat 流，支持暂停/清空
-- 按级别、关键字、PID、Tag 过滤
-- Error / Fatal 标红，Warn 标黄
-- 复制或导出日志到电脑
+- Real-time Logcat stream with pause and clear
+- Filter by level, keyword, PID, and tag
+- Error / Fatal highlighted in red, Warn in yellow
+- Copy or export logs to the PC
 
-### 屏幕与命令
+### Screen and commands
 
-- 屏幕预览（约 1.2 秒刷新），支持点击、滑动、长按、返回/主页/多任务键和文本输入
-- 录制最长 180 秒屏幕并保存到电脑（界面提供 15 秒快捷录制）
-- 内置 scrcpy（v5.0.1），点击即可投屏，无需另外下载
-- 命令面板：直接执行 adb shell 命令，支持当前设备或所有在线设备
-- 保留常用命令历史，最多 20 条
-- 右侧提供 CMD / PowerShell 入口，自动把 `tools` 加入 `PATH`
+- Screen preview (about 1.2 s refresh) with tap, swipe, long-press, Back / Home / Recents keys, and text input
+- Record up to 180 seconds of screen and save it to the PC (15-second quick recording in the UI)
+- Bundled scrcpy (v5.0.1) for one-click screen mirroring — no separate download
+- Command panel: run adb shell commands on the current device or all online devices
+- Command history, up to 20 entries
+- CMD / PowerShell launchers on the right, with `tools` added to `PATH` automatically
 
-### 设置与更新
+### Settings and updates
 
-- 主题色选择与默认下载目录
-- 环境自检：adb / fastboot 版本与设备数量
-- 基于 `tauri-plugin-updater` 的自动更新
+- Accent color (with a smooth transition) and default download directory
+- Environment check: adb / fastboot versions and device count, plus a one-click ADB service restart
+- Auto-update powered by `tauri-plugin-updater`
 
-### 快捷重启
+### Quick reboot
 
-支持重启到：
+Reboot to:
 
-- 系统
-- 恢复模式（recovery）
-- FastBoot（bootloader）
-- 9008（EDL，适用于高通机型）
+- System
+- Recovery
+- FastBoot (bootloader)
+- 9008 (EDL, for Qualcomm devices)
 
-所有重启操作都会先弹出确认窗口。
+Every reboot asks for confirmation first.
 
-### 按模式显示的功能
+### Mode-specific actions
 
-**系统模式**
+**System mode**
 
-- 安装 APK（文件选择）
-- 截图并保存到电脑（目录选择）
-- 暴力清空所有账号 / 用户（需要 root）
-- 绿色守护免 ROOT 模式
-- 激活 ShizukuManager、黑阈、小黑屋（麦克斯韦妖模式）、冰箱
-- 激活 FreezeYou、空调狗、黑洞、太极阴阳门、岛
-- 修改 DPI
-- 解锁系统分区
-- 激活第二空间
-- 清除设备管理员
-- 推送文件到手机主目录
-- 更多
+- Install APK (file picker)
+- Screenshot and save to the PC (directory picker)
+- Force-clear all accounts / users (requires root)
+- Greenify non-root mode
+- Activate ShizukuManager, Brevent, MaxFreeze, and IceBox
+- Activate FreezeYou, AirConditionDog, BlackHole, TaiChi, and Island
+- Change DPI
+- Unlock the system partition
+- Activate a second space
+- Remove device administrators
+- Push files to the device home directory
+- And more
 
-**恢复模式**
+**Recovery mode**
 
-- 清除设备管理员
-- 推送文件到手机主目录
+- Remove device administrators
+- Push files to the device home directory
 
-**FastBoot 模式**
+**FastBoot mode**
 
-- 刷入 Boot.img
-- 刷入 Recovery
-- 重新锁定 Bootloader
+- Flash Boot.img
+- Flash Recovery
+- Re-lock the bootloader
 
-### 网络调试
+### Network debugging
 
-- 通过 IP:端口连接新设备（`adb connect`）
-- 开启当前设备网络调试（`adb tcpip 5555`）
-- 断开网络调试连接（`adb disconnect`）
-- Android 11+ 无线配对（`adb pair`）
+- Connect a new device by IP:port (`adb connect`)
+- Enable network debugging on the current device (`adb tcpip 5555`)
+- Disconnect network debugging (`adb disconnect`)
+- Android 11+ wireless pairing (`adb pair`)
 
-### FastBoot 与备份
+### FastBoot and backups
 
-- 查看 FastBoot 变量（`fastboot getvar all`）
-- 通过 root 备份任意分区为 img 文件
+- View FastBoot variables (`fastboot getvar all`)
+- Auto-detect partitions and back up any partition to an img file via root
 
-### 交互
+### Interaction
 
-- 所有操作都有确认 / 参数弹窗
-- 弹窗内展示命令、stdout、stderr、退出码，可一键复制
-- 文件、多文件、保存目录使用系统原生选择框（Tauri 窗口内）
-- 普通命令统一 600 秒超时、截图 30 秒超时，避免卡死
+- Every action has a confirmation or argument dialog
+- Dangerous operations require an explicit checkbox before execution
+- Dialogs show the command, stdout, stderr, and exit code, with one-click copy
+- Native system pickers for files, multiple files, and directories (inside the Tauri window)
+- Regular commands time out after 600 seconds; screenshots after 30 seconds, so the UI cannot hang
 
-## 快速开始
+## Quick start
 
-### 环境要求
+### Requirements
 
 - Windows 10 / 11
-- [Bun](https://bun.sh/) 或 npm
-- Rust（安装 Tauri 2 所需工具链）
-- 运行 Tauri 应用需要 WebView2（Windows 10/11 通常已自带）
+- [Bun](https://bun.sh/) or npm
+- Rust (the toolchain required by Tauri 2)
+- WebView2 to run the Tauri app (usually preinstalled on Windows 10/11)
 
-### 安装依赖
+### Install dependencies
 
 ```bash
 bun install
 ```
 
-### 启动开发环境
+### Run the dev environment
 
 ```bash
 bun run tauri dev
 ```
 
-只调试前端页面：
+Frontend-only development:
 
 ```bash
 bun run dev
 ```
 
-浏览器模式下会通过 Vite 中间件调用 `tools/adb.exe`，但原生文件选择框不可用，需要手动填写文件或目录路径。
+In browser mode, adb is called through a Vite middleware using `tools/adb.exe`, but native file pickers are unavailable, so paths must be entered manually.
 
-### 构建
+### Build
 
 ```bash
 bun run tauri build
 ```
 
-构建产物位于 `src-tauri/target/release/bundle`。
+Build artifacts are written to `src-tauri/target/release/bundle`.
 
-## 使用前准备
+### Bump the version
 
-1. 在手机上开启「开发者选项」与「USB 调试」
-2. 使用数据线连接电脑，并在手机上允许本电脑调试
-3. 打开应用，在「当前设备」页确认设备已被识别
-4. 多设备时，先在右侧设备列表选中要操作的设备
+```bash
+npm run version:set -- 0.1.5
+```
 
-> 设备显示为 `unauthorized` 时，请在手机上确认授权弹窗。
+This updates `package.json`, `tauri.conf.json`, `Cargo.toml`, and `Cargo.lock`.
 
-## 注意事项
+## Before use
 
-以下操作可能造成数据丢失或设备无法开机，请务必先备份：
+1. Enable Developer options and USB debugging on the phone.
+2. Connect the phone to the PC and allow this computer to debug it.
+3. Open the app and confirm the device appears on the Current device page.
+4. With multiple devices, select the target device in the right-hand list first.
 
-- 清空账号 / 用户
-- 清除设备管理员
-- 重新锁定 Bootloader
-- 刷入 Boot / Recovery 镜像
-- 修改系统分区、DPI、解锁系统分区
+> If the device shows as `unauthorized`, confirm the authorization prompt on the phone.
 
-其他说明：
+## Caveats
 
-- DPM 类激活要求设备上没有其他账号、多用户和应用双开
-- 脚本类激活通常需要先在手机上安装并打开一次对应应用
-- 9008 模式无法通过 adb 检测，需要在设备管理器中确认端口
-- 第三方应用的 DPM / 脚本命令集中在 `src/services/deviceActions.ts`，如与你的应用版本不一致，可直接修改
-- 目前主要面向 Windows，`tools` 目录内为 Windows 版 adb / fastboot
+The following operations may cause data loss or prevent the device from booting. Always back up first:
 
-## 开发
+- Clearing accounts / users
+- Removing device administrators
+- Re-locking the bootloader
+- Flashing Boot / Recovery images
+- Modifying system partitions, DPI, or unlocking the system partition
 
-### 技术栈
+Other notes:
+
+- DPM activation requires no other accounts, multi-user sessions, or app cloning on the device.
+- Script-based activation usually requires installing and opening the target app once on the phone first.
+- 9008 mode cannot be detected through adb; check the port in Device Manager.
+- Third-party DPM / script commands live in `src/services/deviceActions.ts`; edit them if they do not match your app version.
+- The project targets Windows; the `tools` directory contains Windows builds of adb and fastboot.
+
+## Development
+
+### Stack
 
 - Tauri 2
 - Vue 3 + TypeScript
@@ -210,62 +223,63 @@ bun run tauri build
 - Rust
 - adb / fastboot
 
-### 目录结构
+### Project layout
 
 ```text
 .
-├─ src/                      # 前端
+├─ src/                      # Frontend
 │  ├─ composables/
-│  │  └─ useConnectedDevice.ts # 新页面共用的设备轮询
+│  │  └─ useConnectedDevice.ts # Shared device polling for new pages
 │  ├─ services/
-│  │  ├─ adb.ts              # 设备状态、输出解析、命令调用
-│  │  ├─ deviceActions.ts    # 各模式功能与命令定义
-│  │  └─ settings.ts         # 主题色、默认下载目录
+│  │  ├─ adb.ts              # Device status, output parsing, command calls
+│  │  ├─ deviceActions.ts    # Mode-specific actions and commands
+│  │  ├─ permissions.ts      # Chinese permission descriptions
+│  │  └─ settings.ts         # Accent color, default download directory
 │  ├─ views/
-│  │  ├─ HomeView.vue        # 首页、TIPS、项目介绍
-│  │  ├─ DevicesView.vue     # 设备页、设备列表、功能弹窗
-│  │  ├─ AppsView.vue        # 应用管理
-│  │  ├─ FilesView.vue       # 文件管理
+│  │  ├─ HomeView.vue        # Home, TIPS, project intro
+│  │  ├─ DevicesView.vue     # Device page, device list, action dialogs
+│  │  ├─ AppsView.vue        # App management
+│  │  ├─ FilesView.vue       # File management
 │  │  ├─ LogsView.vue        # Logcat
-│  │  └─ SettingsView.vue    # 设置、环境自检、更新
-│  ├─ App.vue                # 顶栏、路由切换动画
+│  │  └─ SettingsView.vue    # Settings, environment check, updates
+│  ├─ App.vue                # Top bar, route transitions
 │  └─ router/
 ├─ src-tauri/                # Tauri / Rust
 │  ├─ src/
-│  │  ├─ adb.rs              # adb / fastboot 执行、超时、白名单、截图
-│  │  └─ lib.rs              # 文件选择、命令注册、退出清理
-│  ├─ icons/                 # 应用图标
+│  │  ├─ adb.rs              # adb / fastboot execution, timeouts, allowlist, screenshots
+│  │  └─ lib.rs              # File pickers, command registration, exit cleanup
+│  ├─ icons/                 # App icons
 │  └─ tauri.conf.json
-├─ tools/                    # 内置 adb / fastboot
-└─ vite.config.ts            # 浏览器开发模式接口
+├─ tools/                    # Bundled adb / fastboot / scrcpy
+└─ vite.config.ts            # Browser dev-mode API
 ```
 
-### 自动更新
+### Auto-update
 
-项目已接入 `tauri-plugin-updater`，更新源为 GitHub Releases 的 `latest.json`。
+The project uses `tauri-plugin-updater` with a GitHub Releases `latest.json` endpoint.
 
-1. 本地签名私钥位于 `.tauri/cat-android-box.key`（已在 `.gitignore` 中忽略），公钥已写入 `tauri.conf.json`。
-2. 在 GitHub 仓库的 Actions Secrets 中添加：
-   - `TAURI_SIGNING_PRIVATE_KEY`：私钥文件内容
-   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`：私钥密码（无密码时留空）
-3. 推送 `v*` 标签后，工作流会自动开启更新包签名并上传 `latest.json` 与 `.sig` 文件。
-4. 未配置密钥时仍可正常构建安装包，但自动更新不可用。
+1. The local signing key is at `.tauri/cat-android-box.key` (ignored by git); its public key is stored in `tauri.conf.json`.
+2. Add these GitHub Actions secrets to the repository:
+   - `TAURI_SIGNING_PRIVATE_KEY`: contents of the private key file
+   - `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`: key password (leave empty if none)
+3. Pushing a `v*` tag enables update signing and uploads `latest.json` plus `.sig` files.
+4. Without keys, installers still build, but auto-update is unavailable.
 
-> 私钥丢失后将无法再为已有版本发布更新，请妥善备份。
+> If the private key is lost, updates for existing versions can no longer be published. Back it up safely.
 
-### 命令执行链路
+### Command execution path
 
-- Tauri 窗口内：前端 `invoke` → Rust `run_device_tool` → `tools/adb.exe` / `fastboot.exe`
-- 浏览器开发模式：前端 `fetch` → Vite 中间件 `/api/adb/exec` → 本机工具
-- 两端都会校验允许的子命令，并附加当前设备序列号（`-s <serial>`）
+- Inside the Tauri window: frontend `invoke` → Rust `run_device_tool` → `tools/adb.exe` / `fastboot.exe`
+- Browser dev mode: frontend `fetch` → Vite middleware `/api/adb/exec` → local tools
+- Both paths validate allowed subcommands and attach the current device serial (`-s <serial>`)
 
-## 联系
+## Contact
 
-- GitHub：[CHCAT1320/cat-android-box](https://github.com/CHCAT1320/cat-android-box)
-- QQ：1095216448
+- GitHub: [CHCAT1320/cat-android-box](https://github.com/CHCAT1320/cat-android-box)
+- QQ: 1095216448
 
 ## License
 
-本项目采用 [MIT License](LICENSE)。
+This project is licensed under the [MIT License](LICENSE).
 
 Copyright (c) 2026 CHCAT1320
