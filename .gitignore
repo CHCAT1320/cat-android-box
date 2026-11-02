@@ -26,3 +26,6 @@ dist-ssr
 # Updater signing keys
 .tauri/
 *.key
+
+# Local Kilo workspace state
+.kilo/
