@@ -7,6 +7,22 @@
 <p align="center">面向 Android 设备的 Windows 桌面工具箱</p>
 
 <p align="center">
+  <a href="https://github.com/CHCAT1320/cat-android-box/releases"><img src="https://img.shields.io/github/v/release/CHCAT1320/cat-android-box?style=flat-square&amp;label=release" alt="Release" /></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/CHCAT1320/cat-android-box?style=flat-square" alt="License" /></a>
+  <img src="https://img.shields.io/badge/platform-Windows-0078D4?style=flat-square" alt="Platform" />
+  <img src="https://img.shields.io/badge/Tauri-2-24C8DB?style=flat-square&amp;logo=tauri&amp;logoColor=white" alt="Tauri 2" />
+  <img src="https://img.shields.io/badge/Vue-3-42B883?style=flat-square&amp;logo=vuedotjs&amp;logoColor=white" alt="Vue 3" />
+  <img src="https://img.shields.io/badge/Rust-000000?style=flat-square&amp;logo=rust&amp;logoColor=white" alt="Rust" />
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/github/stars/CHCAT1320/cat-android-box?style=flat-square" alt="Stars" />
+  <img src="https://img.shields.io/github/forks/CHCAT1320/cat-android-box?style=flat-square" alt="Forks" />
+  <img src="https://img.shields.io/github/downloads/CHCAT1320/cat-android-box/total?style=flat-square" alt="Downloads" />
+  <img src="https://img.shields.io/github/last-commit/CHCAT1320/cat-android-box?style=flat-square" alt="Last commit" />
+</p>
+
+<p align="center">
   <a href="README.md">English</a> · 简体中文
 </p>
 
@@ -16,6 +32,7 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="#功能">功能</a> ·
   <a href="#开发">开发</a> ·
+  <a href="#贡献者">贡献者</a> ·
   <a href="#license">License</a>
 </p>
 
@@ -272,6 +289,24 @@ npm run version:set -- 0.1.5
 - Tauri 窗口内：前端 `invoke` → Rust `run_device_tool` → `tools/adb.exe` / `fastboot.exe`
 - 浏览器开发模式：前端 `fetch` → Vite 中间件 `/api/adb/exec` → 本机工具
 - 两端都会校验允许的子命令，并附加当前设备序列号（`-s <serial>`）
+
+## 贡献者
+
+感谢所有为这个项目做出贡献的人。
+
+<p align="center">
+  <a href="https://github.com/CHCAT1320/cat-android-box/graphs/contributors">
+    <img src="https://contrib.rocks/image?repo=CHCAT1320/cat-android-box" alt="贡献者" />
+  </a>
+</p>
+
+## Star 趋势
+
+<p align="center">
+  <a href="https://star-history.com/#CHCAT1320/cat-android-box&amp;Date">
+    <img src="https://api.star-history.com/svg?repos=CHCAT1320/cat-android-box&amp;type=Date" alt="Star 趋势" />
+  </a>
+</p>
 
 ## 联系
 
