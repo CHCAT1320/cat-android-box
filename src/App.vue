@@ -4,11 +4,21 @@ import { RouterLink, RouterView, useRoute } from "vue-router";
 import { resolveAccent, settings } from "./services/settings";
 
 const accent = ref(resolveAccent());
+let themeTimer: number | undefined;
 
 watch(
   () => settings.accent,
   () => {
+    const root = document.documentElement;
+    root.classList.add("theme-transition");
     accent.value = resolveAccent();
+    if (themeTimer !== undefined) {
+      window.clearTimeout(themeTimer);
+    }
+    themeTimer = window.setTimeout(() => {
+      root.classList.remove("theme-transition");
+      themeTimer = undefined;
+    }, 450);
   },
 );
 
@@ -54,6 +64,10 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("resize", updateIndicator);
+  if (themeTimer !== undefined) {
+    window.clearTimeout(themeTimer);
+    document.documentElement.classList.remove("theme-transition");
+  }
 });
 </script>
 
@@ -100,6 +114,15 @@ body {
 html {
   scrollbar-width: thin;
   scrollbar-color: rgba(148, 163, 184, 0.55) transparent;
+}
+
+/* 切换主题时让颜色平滑过渡 */
+html.theme-transition,
+html.theme-transition *,
+html.theme-transition *::before,
+html.theme-transition *::after {
+  transition: background-color 0.4s ease, color 0.4s ease,
+    border-color 0.4s ease, box-shadow 0.4s ease !important;
 }
 
 html::-webkit-scrollbar,

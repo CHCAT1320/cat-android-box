@@ -1,6 +1,6 @@
 [package]
 name = "cat-android-box"
-version = "0.1.3"
+version = "0.1.4"
 description = "A desktop toolbox for Android devices"
 license = "MIT"
 authors = ["CHCAT1320"]

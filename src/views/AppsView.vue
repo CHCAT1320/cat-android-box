@@ -19,6 +19,7 @@ import {
   type AppEntry,
   type AppMetadata,
 } from "../services/adb";
+import { describePermission } from "../services/permissions";
 import { settings } from "../services/settings";
 
 const { serial, onlineDevices, mode, modeLabel, connected, select } =
@@ -574,6 +575,9 @@ async function exportApk(app: AppEntry) {
         </div>
         <p v-if="detailLoading" class="muted">读取中...</p>
         <p v-if="detailError" class="dialog-error">{{ detailError }}</p>
+        <p v-if="detailTab === 'permissions'" class="perm-note">
+          权限说明仅供参考，具体以系统实际行为为准。
+        </p>
         <div v-if="detailTab === 'info'" class="detail-info">
           <p>
             <span>版本</span>
@@ -593,8 +597,14 @@ async function exportApk(app: AppEntry) {
           <p
             v-for="[name, granted] in detailInfo.permissions"
             :key="name"
+            class="perm-row"
           >
-            <span class="perm-name">{{ name }}</span>
+            <span class="perm-main">
+              <span class="perm-name">{{ name }}</span>
+              <span class="perm-desc">
+                {{ describePermission(name) }}
+              </span>
+            </span>
             <span class="perm-state" :class="{ granted }">
               {{ granted ? "已授予" : "未授予" }}
             </span>
@@ -914,6 +924,26 @@ async function exportApk(app: AppEntry) {
   }
   .perm-name {
     word-break: break-all;
+  }
+  .perm-note {
+    margin: 0 0 8px;
+    color: #6b7280;
+    font-size: 12px;
+    text-align: center;
+  }
+  .perm-row {
+    align-items: flex-start;
+  }
+  .perm-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .perm-desc {
+    color: #6b7280;
+    font-size: 12px;
+    line-height: 1.4;
   }
   .perm-state {
     flex: none;

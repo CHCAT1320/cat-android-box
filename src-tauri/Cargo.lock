@@ -480,7 +480,7 @@ dependencies = [
 
 [[package]]
 name = "cat-android-box"
-version = "0.1.3"
+version = "0.1.4"
 dependencies = [
  "apk-info-axml",
  "base64 0.23.1",
