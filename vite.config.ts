@@ -60,6 +60,9 @@ const allowedVerbs: Record<string, string[]> = {
     "version",
     "kill-server",
     "start-server",
+    "forward",
+    "reverse",
+    "mdns",
   ],
   fastboot: [
     "devices",
@@ -82,6 +85,13 @@ function validateArgs(tool: string, args: string[]): string | null {
       return "缺少设备序列号或命令";
     }
     rest = rest.slice(2);
+  }
+
+  while (
+    rest[0] === "--disable-verity" ||
+    rest[0] === "--disable-verification"
+  ) {
+    rest = rest.slice(1);
   }
 
   const verb = rest[0];

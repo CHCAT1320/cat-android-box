@@ -6,6 +6,8 @@ import {
   forceStopPackage,
   getAppMetadata,
   getPackageDetails,
+  grantPermission,
+  inspectApk,
   installApk,
   installPackage,
   joinLocalPath,
@@ -13,9 +15,11 @@ import {
   pickDirectory,
   pickFile,
   pullFile,
+  revokePermission,
   runningInTauri,
   setPackageEnabled,
   uninstallPackage,
+  type ApkInfo,
   type AppEntry,
   type AppMetadata,
 } from "../services/adb";
@@ -34,6 +38,14 @@ const error = ref("");
 const working = ref<string | null>(null);
 const metadata = ref<Record<string, AppMetadata>>({});
 const batchProgress = ref({ done: 0, total: 0 });
+const selectedApps = ref<Set<string>>(new Set());
+const sortBy = ref<"name" | "package" | "type">("name");
+const apkInfoOpen = ref(false);
+const apkInfo = ref<ApkInfo | null>(null);
+const apkInfoError = ref("");
+const apkInstalledVersion = ref("");
+const apkInspecting = ref(false);
+const permissionWorking = ref<string | null>(null);
 const detailApp = ref<AppEntry | null>(null);
 const detailText = ref("");
 const detailLoading = ref(false);
@@ -200,6 +212,133 @@ const filteredApps = computed(() => {
   });
 });
 
+const sortedApps = computed(() => {
+  const list = [...filteredApps.value];
+  if (sortBy.value === "package") {
+    return list.sort((a, b) => a.packageName.localeCompare(b.packageName));
+  }
+  if (sortBy.value === "type") {
+    return list.sort((a, b) => {
+      if (a.system !== b.system) {
+        return a.system ? 1 : -1;
+      }
+      return (metadata.value[a.packageName]?.label ?? a.packageName).localeCompare(
+        metadata.value[b.packageName]?.label ?? b.packageName,
+      );
+    });
+  }
+  return list.sort((a, b) =>
+    (metadata.value[a.packageName]?.label ?? a.packageName).localeCompare(
+      metadata.value[b.packageName]?.label ?? b.packageName,
+    ),
+  );
+});
+
+function toggleAppSelect(packageName: string) {
+  if (selectedApps.value.has(packageName)) {
+    selectedApps.value.delete(packageName);
+  } else {
+    selectedApps.value.add(packageName);
+  }
+  selectedApps.value = new Set(selectedApps.value);
+}
+
+function toggleAllApps() {
+  if (selectedApps.value.size === sortedApps.value.length) {
+    selectedApps.value = new Set();
+  } else {
+    selectedApps.value = new Set(
+      sortedApps.value.map((app) => app.packageName),
+    );
+  }
+}
+
+function selectedAppEntries() {
+  return apps.value.filter((app) => selectedApps.value.has(app.packageName));
+}
+
+async function batchRemove() {
+  const target = serial.value;
+  const items = selectedAppEntries();
+  if (!target || items.length === 0) {
+    return;
+  }
+  if (!window.confirm(`确定卸载选中的 ${items.length} 个应用吗？`)) {
+    return;
+  }
+  batchProgress.value = { done: 0, total: items.length };
+  error.value = "";
+  try {
+    for (const app of items) {
+      await uninstallPackage(target, app);
+      batchProgress.value.done += 1;
+    }
+    message.value = `已卸载 ${items.length} 个应用`;
+    selectedApps.value = new Set();
+    await reload();
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "批量卸载失败";
+  } finally {
+    batchProgress.value = { done: 0, total: 0 };
+  }
+}
+
+async function batchToggle(enabled: boolean) {
+  const target = serial.value;
+  const items = selectedAppEntries().filter(
+    (app) => app.disabled === enabled,
+  );
+  if (!target || items.length === 0) {
+    return;
+  }
+  const action = enabled ? "启用" : "停用";
+  if (!window.confirm(`确定${action}选中的 ${items.length} 个应用吗？`)) {
+    return;
+  }
+  batchProgress.value = { done: 0, total: items.length };
+  error.value = "";
+  try {
+    for (const app of items) {
+      await setPackageEnabled(target, app.packageName, enabled);
+      batchProgress.value.done += 1;
+    }
+    message.value = `已${action} ${items.length} 个应用`;
+    selectedApps.value = new Set();
+    await reload();
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : `${action}失败`;
+  } finally {
+    batchProgress.value = { done: 0, total: 0 };
+  }
+}
+
+async function checkApk() {
+  const path = await pickFile("选择要检查的 APK", ["apk"]);
+  if (!path) {
+    return;
+  }
+  apkInfoOpen.value = true;
+  apkInfo.value = null;
+  apkInfoError.value = "";
+  apkInstalledVersion.value = "";
+  apkInspecting.value = true;
+  try {
+    const info = await inspectApk(path);
+    apkInfo.value = info;
+    const target = serial.value;
+    if (target && apps.value.some((app) => app.packageName === info.package)) {
+      const dump = await getPackageDetails(target, info.package);
+      apkInstalledVersion.value =
+        dump.match(/versionName=(\S+)/)?.[1] ?? "";
+    }
+  } catch (caught) {
+    apkInfoError.value =
+      caught instanceof Error ? caught.message : "检查 APK 失败";
+  } finally {
+    apkInspecting.value = false;
+  }
+}
+
 async function reload() {
   const target = serial.value;
   if (!target || !connected.value) {
@@ -229,6 +368,7 @@ watch(serial, (next, previous) => {
     metadata.value = {};
     metadataLoading.clear();
     metadataQueue.length = 0;
+    selectedApps.value = new Set();
   }
 });
 
@@ -292,8 +432,7 @@ async function batchInstall() {
 }
 
 async function openDetails(app: AppEntry) {
-  const target = serial.value;
-  if (!target) {
+  if (!serial.value) {
     return;
   }
   detailApp.value = app;
@@ -301,7 +440,17 @@ async function openDetails(app: AppEntry) {
   detailError.value = "";
   detailTab.value = "info";
   detailOpen.value = true;
+  await reloadDetails();
+}
+
+async function reloadDetails() {
+  const target = serial.value;
+  const app = detailApp.value;
+  if (!target || !app) {
+    return;
+  }
   detailLoading.value = true;
+  detailError.value = "";
   try {
     detailText.value = await getPackageDetails(target, app.packageName);
   } catch (caught) {
@@ -309,6 +458,35 @@ async function openDetails(app: AppEntry) {
       caught instanceof Error ? caught.message : "读取应用详情失败";
   } finally {
     detailLoading.value = false;
+  }
+}
+
+async function togglePermission(permission: string, granted: boolean) {
+  const target = serial.value;
+  const app = detailApp.value;
+  if (!target || !app || permissionWorking.value) {
+    return;
+  }
+  if (
+    granted &&
+    !window.confirm(`确定撤销 ${permission} 的授权吗？`)
+  ) {
+    return;
+  }
+  permissionWorking.value = permission;
+  detailError.value = "";
+  try {
+    if (granted) {
+      await revokePermission(target, app.packageName, permission);
+    } else {
+      await grantPermission(target, app.packageName, permission);
+    }
+    await reloadDetails();
+  } catch (caught) {
+    detailError.value =
+      caught instanceof Error ? caught.message : "修改权限失败";
+  } finally {
+    permissionWorking.value = null;
   }
 }
 
@@ -482,6 +660,11 @@ async function exportApk(app: AppEntry) {
         <option value="user">用户应用</option>
         <option value="system">系统应用</option>
       </select>
+      <select v-model="sortBy" class="filter">
+        <option value="name">按名称</option>
+        <option value="package">按包名</option>
+        <option value="type">按类型</option>
+      </select>
       <button :disabled="!connected || appsLoading" @click="reload">刷新</button>
       <button :disabled="!connected" @click="handleInstall">
         安装包（APK/APKS/XAPK）
@@ -489,10 +672,31 @@ async function exportApk(app: AppEntry) {
       <button :disabled="onlineDevices.length === 0" @click="batchInstall">
         批量安装
       </button>
+      <button :disabled="apkInspecting" @click="checkApk">检查 APK</button>
+    </div>
+
+    <div v-if="connected" class="batch-bar">
+      <button @click="toggleAllApps">
+        {{
+          selectedApps.size > 0 && selectedApps.size === sortedApps.length
+            ? "取消全选"
+            : "全选"
+        }}
+      </button>
+      <span class="selection-count">已选 {{ selectedApps.size }} 项</span>
+      <button :disabled="selectedApps.size === 0" @click="batchRemove">
+        批量卸载
+      </button>
+      <button :disabled="selectedApps.size === 0" @click="batchToggle(false)">
+        批量停用
+      </button>
+      <button :disabled="selectedApps.size === 0" @click="batchToggle(true)">
+        批量启用
+      </button>
     </div>
 
     <p v-if="batchProgress.total > 0" class="muted">
-      批量安装进度：{{ batchProgress.done }} / {{ batchProgress.total }}
+      批量进度：{{ batchProgress.done }} / {{ batchProgress.total }}
     </p>
 
     <p v-if="appsLoading" class="muted">读取中...</p>
@@ -500,15 +704,21 @@ async function exportApk(app: AppEntry) {
     <pre v-if="message" class="message output">{{ message }}</pre>
 
     <div v-if="connected" class="app-list">
-      <p v-if="filteredApps.length === 0 && !appsLoading" class="muted empty">
+      <p v-if="sortedApps.length === 0 && !appsLoading" class="muted empty">
         没有匹配的应用
       </p>
       <div
-        v-for="app in filteredApps"
+        v-for="app in sortedApps"
         :key="app.packageName"
         :ref="(el) => setRowRef(app.packageName, el)"
         class="app-row"
       >
+        <input
+          type="checkbox"
+          class="app-check"
+          :checked="selectedApps.has(app.packageName)"
+          @change="toggleAppSelect(app.packageName)"
+        />
         <div class="app-icon" :style="iconStyle(app.packageName)">
           <img
             v-if="appMeta(app.packageName)?.icon"
@@ -605,8 +815,17 @@ async function exportApk(app: AppEntry) {
                 {{ describePermission(name) }}
               </span>
             </span>
-            <span class="perm-state" :class="{ granted }">
-              {{ granted ? "已授予" : "未授予" }}
+            <span class="perm-actions">
+              <span class="perm-state" :class="{ granted }">
+                {{ granted ? "已授予" : "未授予" }}
+              </span>
+              <button
+                class="perm-toggle"
+                :disabled="permissionWorking !== null"
+                @click="togglePermission(name, granted)"
+              >
+                {{ granted ? "撤销" : "授予" }}
+              </button>
             </span>
           </p>
         </div>
@@ -626,6 +845,43 @@ async function exportApk(app: AppEntry) {
             清除数据
           </button>
           <button class="dialog-confirm" @click="closeDetails">关闭</button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="apkInfoOpen" class="dialog-mask" @click.self="apkInfoOpen = false">
+      <div class="dialog" role="dialog" aria-modal="true">
+        <h2>APK 检查</h2>
+        <p v-if="apkInspecting" class="muted">解析中...</p>
+        <p v-if="apkInfoError" class="dialog-error">{{ apkInfoError }}</p>
+        <div v-if="apkInfo" class="detail-info">
+          <p><span>包名</span>{{ apkInfo.package }}</p>
+          <p><span>名称</span>{{ apkInfo.label || "-" }}</p>
+          <p>
+            <span>版本</span>
+            {{ apkInfo.versionName }} ({{ apkInfo.versionCode }})
+          </p>
+          <p>
+            <span>SHA-256</span>
+            <span class="hash">{{ apkInfo.sha256 }}</span>
+          </p>
+          <p v-if="apkInstalledVersion">
+            <span>已安装</span>{{ apkInstalledVersion }}
+          </p>
+          <p
+            v-if="
+              apkInstalledVersion &&
+              apkInstalledVersion !== apkInfo.versionName
+            "
+            class="version-diff"
+          >
+            版本与已安装应用不一致
+          </p>
+        </div>
+        <div class="dialog-actions">
+          <button class="dialog-confirm" @click="apkInfoOpen = false">
+            关闭
+          </button>
         </div>
       </div>
     </div>
@@ -728,6 +984,50 @@ async function exportApk(app: AppEntry) {
     margin-top: 14px;
     border: 1px solid #e5e7eb;
     background: #fff;
+  }
+  .batch-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 10px 12px;
+    border: 1px solid #e5e7eb;
+    background: #fff;
+  }
+  .batch-bar button {
+    padding: 6px 10px;
+    border: 1px solid var(--accent);
+    background: #fff;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .batch-bar button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+  .selection-count {
+    color: #6b7280;
+    font-size: 12px;
+  }
+  .app-check {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+  .hash {
+    width: auto !important;
+    flex: 1;
+    color: #374151 !important;
+    word-break: break-all;
+  }
+  .version-diff {
+    justify-content: center !important;
+    color: #b45309 !important;
   }
   .app-row {
     display: flex;
@@ -948,6 +1248,26 @@ async function exportApk(app: AppEntry) {
   .perm-state {
     flex: none;
     color: #b45309;
+  }
+  .perm-actions {
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+  }
+  .perm-toggle {
+    padding: 2px 8px;
+    border: 1px solid var(--accent);
+    background: #fff;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: 11px;
+    cursor: pointer;
+  }
+  .perm-toggle:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
   .perm-state.granted {
     color: #166534;

@@ -480,13 +480,14 @@ dependencies = [
 
 [[package]]
 name = "cat-android-box"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "apk-info-axml",
  "base64 0.23.1",
  "rfd",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-opener",

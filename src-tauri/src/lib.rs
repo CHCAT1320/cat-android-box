@@ -47,6 +47,7 @@ pub fn run() {
             adb::take_screenshot,
             adb::capture_screen,
             adb::get_app_metadata,
+            adb::inspect_apk,
             adb::install_package,
             adb::read_device_file,
             adb::start_logcat,

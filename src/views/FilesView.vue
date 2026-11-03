@@ -2,9 +2,12 @@
 import { computed, ref, watch } from "vue";
 import { useConnectedDevice } from "../composables/useConnectedDevice";
 import {
+  checksumFile,
+  compressPaths,
   copyRemotePath,
   createRemoteDirectory,
   deleteRemotePath,
+  extractArchive,
   formatBytes,
   joinLocalPath,
   joinRemotePath,
@@ -16,6 +19,8 @@ import {
   pushFiles,
   readDeviceFile,
   renameRemotePath,
+  writeDeviceFile,
+  type FileChecksums,
   type FileEntry,
 } from "../services/adb";
 import { settings } from "../services/settings";
@@ -41,6 +46,9 @@ const previewImage = ref("");
 const previewText = ref("");
 const previewLoading = ref(false);
 const previewError = ref("");
+const rootMode = ref(false);
+const previewChecksums = ref<FileChecksums | null>(null);
+const previewSaving = ref(false);
 
 const BOOKMARK_KEY = "cat-android-box-file-bookmarks";
 
@@ -108,7 +116,7 @@ async function reload() {
   listing.value = true;
   error.value = "";
   try {
-    entries.value = await listDirectory(target, path.value);
+    entries.value = await listDirectory(target, path.value, rootMode.value);
   } catch (caught) {
     error.value = caught instanceof Error ? caught.message : "读取目录失败";
     entries.value = [];
@@ -132,6 +140,12 @@ watch(
     void reload();
   },
 );
+
+watch(rootMode, () => {
+  if (connected.value) {
+    void reload();
+  }
+});
 
 function goUp() {
   if (path.value === "/" || path.value === "") {
@@ -402,6 +416,36 @@ function clearBookmarks() {
   saveBookmarks();
 }
 
+async function archiveSelected() {
+  const target = serial.value;
+  const items = selectedEntries();
+  if (!target || items.length === 0) {
+    return;
+  }
+  const name = window.prompt(
+    "压缩包名称",
+    `backup-${Date.now()}.tar`,
+  );
+  if (!name || name.includes("/")) {
+    return;
+  }
+  working.value = "archive";
+  error.value = "";
+  try {
+    message.value = await compressPaths(
+      target,
+      items.map((entry) => entry.path),
+      joinRemotePath(path.value, name),
+      rootMode.value,
+    );
+    await reload();
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "打包失败";
+  } finally {
+    working.value = null;
+  }
+}
+
 async function openPreview(entry: FileEntry) {
   const target = serial.value;
   if (!target || entry.isDir) {
@@ -413,9 +457,15 @@ async function openPreview(entry: FileEntry) {
   previewImage.value = "";
   previewText.value = "";
   previewError.value = "";
+  previewChecksums.value = null;
   previewLoading.value = true;
   try {
-    const result = await readDeviceFile(target, entry.path);
+    const result = await readDeviceFile(
+      target,
+      entry.path,
+      8 * 1024 * 1024,
+      rootMode.value,
+    );
     if (result.mime.startsWith("image/")) {
       previewKind.value = "image";
       previewImage.value = `data:${result.mime};base64,${result.data}`;
@@ -440,6 +490,76 @@ function closePreview() {
   previewImage.value = "";
   previewText.value = "";
   previewKind.value = "none";
+  previewChecksums.value = null;
+}
+
+async function loadPreviewChecksums() {
+  const target = serial.value;
+  const entry = previewEntry.value;
+  if (!target || !entry) {
+    return;
+  }
+  previewError.value = "";
+  try {
+    previewChecksums.value = await checksumFile(
+      target,
+      entry.path,
+      rootMode.value,
+    );
+  } catch (caught) {
+    previewError.value =
+      caught instanceof Error ? caught.message : "校验失败";
+  }
+}
+
+async function savePreviewFile() {
+  const target = serial.value;
+  const entry = previewEntry.value;
+  if (!target || !entry || previewKind.value !== "text" || previewSaving.value) {
+    return;
+  }
+  previewSaving.value = true;
+  previewError.value = "";
+  try {
+    await writeDeviceFile(
+      target,
+      entry.path,
+      previewText.value,
+      rootMode.value,
+    );
+    message.value = `已保存：${entry.path}`;
+  } catch (caught) {
+    previewError.value =
+      caught instanceof Error ? caught.message : "保存失败";
+  } finally {
+    previewSaving.value = false;
+  }
+}
+
+async function extractFile(entry: FileEntry) {
+  const target = serial.value;
+  if (!target) {
+    return;
+  }
+  const destination = joinRemotePath(
+    path.value,
+    entry.name.replace(/\.(zip|jar)$/i, "") || "extracted",
+  );
+  working.value = entry.path;
+  error.value = "";
+  try {
+    message.value = await extractArchive(
+      target,
+      entry.path,
+      destination,
+      rootMode.value,
+    );
+    await reload();
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "解压失败";
+  } finally {
+    working.value = null;
+  }
 }
 </script>
 
@@ -484,6 +604,13 @@ function closePreview() {
       <button :disabled="onlineDevices.length === 0" @click="batchUpload">
         批量上传
       </button>
+      <button
+        :class="{ active: rootMode }"
+        :disabled="!connected"
+        @click="rootMode = !rootMode"
+      >
+        {{ rootMode ? "退出 Root 浏览" : "Root 浏览" }}
+      </button>
     </div>
 
     <div class="toolbar">
@@ -511,6 +638,9 @@ function closePreview() {
       </button>
       <button :disabled="selected.size === 0" @click="copyOrMove('move')">
         移动到
+      </button>
+      <button :disabled="selected.size === 0" @click="archiveSelected">
+        打包为 tar
       </button>
       <button
         class="danger"
@@ -590,6 +720,13 @@ function closePreview() {
           >
             下载
           </button>
+          <button
+            v-if="!entry.isDir && /\.(zip|jar)$/i.test(entry.name)"
+            :disabled="working !== null"
+            @click="extractFile(entry)"
+          >
+            解压
+          </button>
           <button :disabled="working !== null" @click="rename(entry)">重命名</button>
           <button
             class="danger"
@@ -620,11 +757,31 @@ function closePreview() {
           class="preview-image"
           alt="文件预览"
         />
-        <pre
+        <textarea
           v-if="previewKind === 'text'"
-          class="preview-text"
-        >{{ previewText }}</pre>
+          v-model="previewText"
+          class="preview-editor"
+        ></textarea>
+        <div v-if="previewChecksums" class="checksum-box">
+          <p>MD5: {{ previewChecksums.md5 }}</p>
+          <p>SHA-256: {{ previewChecksums.sha256 }}</p>
+        </div>
         <div class="dialog-actions">
+          <button
+            v-if="previewKind === 'text'"
+            class="dialog-cancel"
+            :disabled="previewSaving"
+            @click="savePreviewFile"
+          >
+            {{ previewSaving ? "保存中..." : "保存" }}
+          </button>
+          <button
+            v-if="previewEntry"
+            class="dialog-cancel"
+            @click="loadPreviewChecksums"
+          >
+            校验
+          </button>
           <button class="dialog-confirm" @click="closePreview">关闭</button>
         </div>
       </div>
@@ -928,11 +1085,15 @@ function closePreview() {
     margin: 0 auto;
     object-fit: contain;
   }
-  .preview-text {
+  .preview-editor {
+    box-sizing: border-box;
+    width: 100%;
+    min-height: 240px;
     max-height: 66vh;
     margin: 0;
     padding: 10px;
     overflow: auto;
+    border: 1px solid #334155;
     background: #0f172a;
     color: #e2e8f0;
     font-family: Consolas, monospace;
@@ -941,5 +1102,23 @@ function closePreview() {
     text-align: left;
     white-space: pre-wrap;
     word-break: break-all;
+    resize: vertical;
+  }
+  .checksum-box {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid #e5e7eb;
+    background: #f9fafb;
+    text-align: left;
+    font-family: Consolas, monospace;
+    font-size: 11px;
+    word-break: break-all;
+  }
+  .checksum-box p {
+    margin: 2px 0;
+  }
+  .toolbar button.active {
+    background: var(--accent);
+    color: #fff;
   }
 </style>

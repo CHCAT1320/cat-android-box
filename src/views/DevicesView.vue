@@ -80,11 +80,32 @@
                     FastBoot 变量
                 </button>
                 <button
+                    v-if="deviceMode === 'fastboot'"
+                    class="mode-action"
+                    @click="openFlashDialog"
+                >
+                    分区刷写
+                </button>
+                <button
                     v-if="isAdbConnected"
                     class="mode-action"
                     @click="openBackupDialog"
                 >
                     分区备份
+                </button>
+                <button
+                    v-if="isAdbConnected"
+                    class="mode-action"
+                    @click="openNetworkTools"
+                >
+                    网络工具
+                </button>
+                <button
+                    v-if="isAdbConnected"
+                    class="mode-action"
+                    @click="openDeviceTools"
+                >
+                    设备工具
                 </button>
             </div>
 
@@ -286,6 +307,13 @@
                         >
                             {{ commandRunning ? "执行中..." : "执行" }}
                         </button>
+                        <button
+                            class="action-pick"
+                            :disabled="commandText.trim() === ''"
+                            @click="toggleFavorite"
+                        >
+                            收藏
+                        </button>
                     </div>
                     <p v-if="commandError" class="dialog-error">
                         {{ commandError }}
@@ -314,6 +342,71 @@
                         >
                             {{ item }}
                         </button>
+                    </div>
+                    <div v-if="favorites.length > 0" class="command-history">
+                        <span>收藏：</span>
+                        <button
+                            v-for="item in favorites"
+                            :key="item"
+                            :disabled="commandRunning"
+                            @click="useCommand(item)"
+                        >
+                            {{ item }}
+                        </button>
+                    </div>
+
+                    <h3 class="tool-section">脚本</h3>
+                    <textarea
+                        v-model="commandScript"
+                        class="script-input"
+                        placeholder="每行一条 adb shell 命令，以 # 开头为注释"
+                        :disabled="commandRunning"
+                    ></textarea>
+                    <div class="action-input">
+                        <input
+                            v-model="scriptName"
+                            placeholder="脚本名称"
+                            :disabled="commandRunning"
+                        />
+                        <button
+                            class="action-pick"
+                            :disabled="commandRunning"
+                            @click="saveCurrentScript"
+                        >
+                            保存脚本
+                        </button>
+                        <button
+                            class="action-pick"
+                            :disabled="commandRunning || commandScript.trim() === ''"
+                            @click="runScript"
+                        >
+                            {{ commandRunning ? "执行中..." : "运行脚本" }}
+                        </button>
+                    </div>
+                    <div
+                        v-if="savedScripts.length > 0"
+                        class="script-list"
+                    >
+                        <div
+                            v-for="item in savedScripts"
+                            :key="item.name"
+                            class="script-item"
+                        >
+                            <button
+                                class="script-load"
+                                :disabled="commandRunning"
+                                @click="loadScript(item)"
+                            >
+                                {{ item.name }}
+                            </button>
+                            <button
+                                class="script-delete"
+                                :disabled="commandRunning"
+                                @click="deleteScript(item.name)"
+                            >
+                                删除
+                            </button>
+                        </div>
                     </div>
                     <pre v-if="commandOutput" class="command-output">{{ commandOutput }}</pre>
                     <div class="dialog-actions">
@@ -392,6 +485,12 @@
                         </button>
                         <button class="dialog-cancel" @click="startScrcpy">
                             scrcpy
+                        </button>
+                        <button
+                            class="dialog-cancel"
+                            @click="startScrcpyRecording"
+                        >
+                            投屏并录制
                         </button>
                         <button class="dialog-confirm" @click="savePreview">
                             保存截图
@@ -508,6 +607,288 @@
                             @click="runBackup"
                         >
                             {{ backupRunning ? "备份中..." : "开始备份" }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="showFlashDialog" class="dialog-mask" @click.self="showFlashDialog = false">
+                <div class="dialog" role="dialog" aria-modal="true">
+                    <h2>分区刷写</h2>
+                    <p class="help-text">
+                        通过 fastboot 刷入指定分区。请确认分区名和镜像完全匹配。
+                    </p>
+                    <div class="pair-form">
+                        <input
+                            v-model="flashPartition"
+                            placeholder="分区名，例如 boot / recovery / vbmeta"
+                            :disabled="flashRunning"
+                        />
+                        <div class="action-input">
+                            <input
+                                v-model="flashFilePath"
+                                placeholder="镜像文件路径"
+                                :disabled="flashRunning"
+                            />
+                            <button
+                                class="action-pick"
+                                :disabled="flashRunning"
+                                @click="chooseFlashFile"
+                            >
+                                选择文件
+                            </button>
+                        </div>
+                        <label class="danger-confirm">
+                            <input
+                                v-model="flashVbmeta"
+                                type="checkbox"
+                                :disabled="flashRunning"
+                            />
+                            <span>刷入 vbmeta 时同时禁用 verity / verification 校验</span>
+                        </label>
+                    </div>
+                    <p v-if="flashError" class="dialog-error">{{ flashError }}</p>
+                    <p v-if="flashNotice" class="pair-success">{{ flashNotice }}</p>
+                    <div class="dialog-actions">
+                        <button
+                            class="dialog-cancel"
+                            :disabled="flashRunning"
+                            @click="showFlashDialog = false"
+                        >
+                            关闭
+                        </button>
+                        <button
+                            class="dialog-confirm"
+                            :disabled="flashRunning"
+                            @click="runFlash"
+                        >
+                            {{ flashRunning ? "刷入中..." : "开始刷入" }}
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="showNetworkTools" class="dialog-mask" @click.self="showNetworkTools = false">
+                <div class="dialog action-dialog" role="dialog" aria-modal="true">
+                    <h2>网络工具</h2>
+                    <p class="action-desc">
+                        端口转发、反向转发、无线调试服务发现与全局 HTTP 代理。
+                    </p>
+                    <p v-if="networkError" class="dialog-error">
+                        {{ networkError }}
+                    </p>
+                    <p v-if="networkNotice" class="pair-success">
+                        {{ networkNotice }}
+                    </p>
+
+                    <h3 class="tool-section">端口转发</h3>
+                    <div class="action-input">
+                        <input v-model="forwardLocal" placeholder="电脑端口" />
+                        <input v-model="forwardRemote" placeholder="设备端口" />
+                        <button
+                            class="action-pick"
+                            :disabled="networkBusy"
+                            @click="addPortForward"
+                        >
+                            添加
+                        </button>
+                        <button
+                            class="action-pick"
+                            :disabled="networkBusy"
+                            @click="removeForwardPrompt"
+                        >
+                            移除
+                        </button>
+                    </div>
+                    <pre v-if="forwardRules" class="command-output">{{ forwardRules }}</pre>
+
+                    <h3 class="tool-section">反向转发</h3>
+                    <div class="action-input">
+                        <input v-model="reverseRemote" placeholder="设备端口" />
+                        <input v-model="reverseLocal" placeholder="电脑端口" />
+                        <button
+                            class="action-pick"
+                            :disabled="networkBusy"
+                            @click="addPortReverse"
+                        >
+                            添加
+                        </button>
+                        <button
+                            class="action-pick"
+                            :disabled="networkBusy"
+                            @click="removeReversePrompt"
+                        >
+                            移除
+                        </button>
+                    </div>
+
+                    <h3 class="tool-section">无线调试服务</h3>
+                    <pre v-if="mdnsList" class="command-output">{{ mdnsList }}</pre>
+                    <div class="action-input">
+                        <input v-model="mdnsAddress" placeholder="IP:端口" />
+                        <button
+                            class="action-pick"
+                            :disabled="networkBusy"
+                            @click="connectMdns"
+                        >
+                            连接
+                        </button>
+                    </div>
+
+                    <h3 class="tool-section">全局 HTTP 代理</h3>
+                    <div class="action-input">
+                        <input
+                            v-model="proxyValue"
+                            placeholder="host:port，留空表示清除"
+                        />
+                        <button
+                            class="action-pick"
+                            :disabled="networkBusy"
+                            @click="applyProxy(false)"
+                        >
+                            设置
+                        </button>
+                        <button
+                            class="action-pick"
+                            :disabled="networkBusy"
+                            @click="applyProxy(true)"
+                        >
+                            清除
+                        </button>
+                    </div>
+
+                    <div class="dialog-actions">
+                        <button
+                            class="dialog-cancel"
+                            :disabled="networkBusy"
+                            @click="refreshNetworkTools"
+                        >
+                            刷新
+                        </button>
+                        <button
+                            class="dialog-confirm"
+                            @click="showNetworkTools = false"
+                        >
+                            关闭
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="showDeviceTools" class="dialog-mask" @click.self="showDeviceTools = false">
+                <div class="dialog action-dialog" role="dialog" aria-modal="true">
+                    <h2>设备工具</h2>
+                    <p class="action-desc">
+                        显示参数、动画缩放、电源和多用户管理。
+                    </p>
+                    <p v-if="toolsError" class="dialog-error">
+                        {{ toolsError }}
+                    </p>
+                    <p v-if="toolsNotice" class="pair-success">
+                        {{ toolsNotice }}
+                    </p>
+
+                    <h3 class="tool-section">显示</h3>
+                    <pre v-if="display" class="command-output">{{ display.size }}
+{{ display.density }}</pre>
+                    <div class="action-input">
+                        <input
+                            v-model="sizeOverride"
+                            placeholder="分辨率，例如 1080x2400"
+                        />
+                        <button class="action-pick" :disabled="toolsBusy" @click="applyDisplaySize">
+                            设置
+                        </button>
+                        <button
+                            class="action-pick"
+                            :disabled="toolsBusy"
+                            @click="sizeOverride = ''; applyDisplaySize()"
+                        >
+                            恢复
+                        </button>
+                    </div>
+                    <div class="action-input">
+                        <input
+                            v-model="densityOverride"
+                            placeholder="DPI，例如 420"
+                        />
+                        <button class="action-pick" :disabled="toolsBusy" @click="applyDisplayDensity">
+                            设置
+                        </button>
+                        <button
+                            class="action-pick"
+                            :disabled="toolsBusy"
+                            @click="densityOverride = ''; applyDisplayDensity()"
+                        >
+                            恢复
+                        </button>
+                    </div>
+                    <div class="action-input">
+                        <input
+                            v-model="animationValue"
+                            placeholder="动画缩放，例如 1"
+                        />
+                        <button class="action-pick" :disabled="toolsBusy" @click="applyAnimationScale">
+                            应用动画缩放
+                        </button>
+                    </div>
+                    <div class="action-input">
+                        <button class="action-pick" :disabled="toolsBusy" @click="toggleStayAwake(true)">
+                            保持常亮
+                        </button>
+                        <button class="action-pick" :disabled="toolsBusy" @click="toggleStayAwake(false)">
+                            取消常亮
+                        </button>
+                        <button class="action-pick" :disabled="toolsBusy" @click="sleepDeviceScreen">
+                            熄灭屏幕
+                        </button>
+                    </div>
+
+                    <h3 class="tool-section">用户</h3>
+                    <div class="tool-list">
+                        <div v-for="user in users" :key="user.id" class="tool-row">
+                            <span>
+                                {{ user.name }} ({{ user.id }})
+                                <span v-if="user.current"> · 当前</span>
+                            </span>
+                            <span class="tool-row-actions">
+                                <button
+                                    class="action-pick"
+                                    :disabled="toolsBusy || user.current"
+                                    @click="switchDeviceUser(user.id)"
+                                >
+                                    切换
+                                </button>
+                                <button
+                                    class="action-pick danger"
+                                    :disabled="toolsBusy || user.current"
+                                    @click="deleteDeviceUser(user)"
+                                >
+                                    删除
+                                </button>
+                            </span>
+                        </div>
+                    </div>
+                    <div class="action-input">
+                        <input v-model="newUserName" placeholder="新用户名称" />
+                        <button class="action-pick" :disabled="toolsBusy" @click="addDeviceUser">
+                            创建用户
+                        </button>
+                    </div>
+
+                    <div class="dialog-actions">
+                        <button
+                            class="dialog-cancel"
+                            :disabled="toolsBusy"
+                            @click="refreshDeviceTools"
+                        >
+                            刷新
+                        </button>
+                        <button
+                            class="dialog-confirm"
+                            @click="showDeviceTools = false"
+                        >
+                            关闭
                         </button>
                     </div>
                 </div>
@@ -646,9 +1027,31 @@
         runningInTauri,
         takeScreenshot,
         tapScreen,
+        addForward,
+        addReverse,
+        connectDevice,
+        createUser,
+        forwardList,
+        getDisplaySettings,
+        getProxy,
+        listUsers,
+        mdnsServices,
+        removeForward,
+        removeReverse,
+        removeUser,
+        screenOff,
+        setAnimationScale,
+        setDisplayDensity,
+        setDisplaySize,
+        setProxy,
+        setStayAwake,
+        switchUser,
+        joinLocalPath,
         type AdbDevice,
         type DeviceInfo,
         type DeviceMode,
+        type DeviceUser,
+        type DisplaySettings,
         type RebootMode,
         type ToolOutput,
     } from "../services/adb";
@@ -1313,6 +1716,150 @@
         commandText.value = command;
     }
 
+    // ---------- 脚本与收藏 ----------
+    const SCRIPT_KEY = "cat-android-box-scripts";
+    const FAVORITE_KEY = "cat-android-box-favorites";
+    const commandScript = ref("");
+    const scriptName = ref("");
+    const savedScripts = ref<{ name: string; body: string }[]>(
+        loadSavedScripts(),
+    );
+    const favorites = ref<string[]>(loadFavorites());
+
+    function loadSavedScripts(): { name: string; body: string }[] {
+        try {
+            const raw = localStorage.getItem(SCRIPT_KEY);
+            return raw ? (JSON.parse(raw) as { name: string; body: string }[]) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function loadFavorites(): string[] {
+        try {
+            const raw = localStorage.getItem(FAVORITE_KEY);
+            return raw ? (JSON.parse(raw) as string[]) : [];
+        } catch {
+            return [];
+        }
+    }
+
+    function saveScripts() {
+        localStorage.setItem(SCRIPT_KEY, JSON.stringify(savedScripts.value));
+    }
+
+    function saveCurrentScript() {
+        const name = scriptName.value.trim();
+        const body = commandScript.value.trim();
+        if (name === "" || body === "") {
+            commandError.value = "请填写脚本名称和内容";
+            return;
+        }
+        const existing = savedScripts.value.find(
+            (item) => item.name === name,
+        );
+        if (existing) {
+            existing.body = body;
+            savedScripts.value = [...savedScripts.value];
+        } else {
+            savedScripts.value = [...savedScripts.value, { name, body }];
+        }
+        saveScripts();
+        commandError.value = "";
+    }
+
+    function loadScript(item: { name: string; body: string }) {
+        scriptName.value = item.name;
+        commandScript.value = item.body;
+    }
+
+    function deleteScript(name: string) {
+        savedScripts.value = savedScripts.value.filter(
+            (item) => item.name !== name,
+        );
+        saveScripts();
+    }
+
+    function toggleFavorite() {
+        const command = commandText.value.trim();
+        if (command === "") {
+            return;
+        }
+        favorites.value = favorites.value.includes(command)
+            ? favorites.value.filter((item) => item !== command)
+            : [...favorites.value, command];
+        localStorage.setItem(FAVORITE_KEY, JSON.stringify(favorites.value));
+    }
+
+    function scriptTargets(): string[] {
+        return commandTarget.value === "all"
+            ? statusDevices.value
+                  .filter((device) => device.state === "device")
+                  .map((device) => device.serial)
+            : activeSerial.value
+              ? [activeSerial.value]
+              : [];
+    }
+
+    async function runScript() {
+        if (commandRunning.value) {
+            return;
+        }
+        const commands = commandScript.value
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line !== "" && !line.startsWith("#"));
+        const targets = scriptTargets();
+        if (commands.length === 0) {
+            commandError.value = "脚本中没有可执行的命令";
+            return;
+        }
+        if (targets.length === 0) {
+            commandError.value = "没有可执行的设备";
+            return;
+        }
+        commandRunning.value = true;
+        commandOutput.value = "";
+        commandError.value = "";
+        failedSerials.value = [];
+        commandProgress.value = {
+            done: 0,
+            total: commands.length * targets.length,
+        };
+        const parts: string[] = [];
+        try {
+            for (const target of targets) {
+                parts.push(`# ${target}`);
+                for (const command of commands) {
+                    try {
+                        const result = await runDeviceTool("adb", [
+                            "-s",
+                            target,
+                            "shell",
+                            command,
+                        ]);
+                        const output =
+                            (result.stdout || result.stderr).trim() ||
+                            `[exit code: ${result.code ?? "-"}]`;
+                        parts.push(`$ ${command}\n${output}`);
+                    } catch (error) {
+                        failedSerials.value.push(target);
+                        parts.push(
+                            `$ ${command}\n${
+                                error instanceof Error ? error.message : "执行失败"
+                            }`,
+                        );
+                    }
+                    commandProgress.value.done += 1;
+                }
+            }
+            commandOutput.value = parts.join("\n");
+        } finally {
+            commandRunning.value = false;
+            commandProgress.value = { done: 0, total: 0 };
+        }
+    }
+
     // ---------- 屏幕预览 ----------
     const showPreview = ref(false);
     const previewImage = ref("");
@@ -1572,6 +2119,444 @@
             previewError.value =
                 error instanceof Error ? error.message : "启动 scrcpy 失败";
         }
+    }
+
+    async function startScrcpyRecording() {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        let directory = settings.downloadDirectory;
+        if (directory.trim() === "") {
+            const picked = await pickDirectory("选择 scrcpy 录制保存目录");
+            if (!picked) {
+                return;
+            }
+            directory = picked;
+        }
+        const recordPath = joinLocalPath(
+            directory,
+            `scrcpy-${Date.now()}.mp4`,
+        );
+        previewError.value = "";
+        previewNotice.value = "";
+        try {
+            await launchScrcpy(target, recordPath);
+            previewNotice.value = `scrcpy 已启动并录制到：${recordPath}`;
+        } catch (error) {
+            previewError.value =
+                error instanceof Error ? error.message : "启动录制失败";
+        }
+    }
+
+    // ---------- 分区刷写 ----------
+    const showFlashDialog = ref(false);
+    const flashPartition = ref("");
+    const flashFilePath = ref("");
+    const flashVbmeta = ref(false);
+    const flashRunning = ref(false);
+    const flashError = ref("");
+    const flashNotice = ref("");
+
+    function openFlashDialog() {
+        flashPartition.value = "";
+        flashFilePath.value = "";
+        flashVbmeta.value = false;
+        flashError.value = "";
+        flashNotice.value = "";
+        showFlashDialog.value = true;
+    }
+
+    async function chooseFlashFile() {
+        const path = await pickFile("选择要刷入的镜像", ["img", "bin"]);
+        if (path) {
+            flashFilePath.value = path;
+        }
+    }
+
+    async function runFlash() {
+        const target = activeSerial.value;
+        if (!target || flashRunning.value) {
+            return;
+        }
+        const partition = flashPartition.value.trim();
+        if (partition === "" || flashFilePath.value.trim() === "") {
+            flashError.value = "请填写分区名并选择镜像文件";
+            return;
+        }
+        if (
+            !window.confirm(
+                `确定把镜像刷入 ${partition} 分区吗？操作失败可能导致设备无法开机。`,
+            )
+        ) {
+            return;
+        }
+        flashRunning.value = true;
+        flashError.value = "";
+        flashNotice.value = "刷入中，请保持设备连接...";
+        try {
+            const args = ["-s", target];
+            if (flashVbmeta.value) {
+                args.push("--disable-verity", "--disable-verification");
+            }
+            args.push("flash", partition, flashFilePath.value.trim());
+            const result = await runDeviceTool("fastboot", args);
+            if (result.code !== 0) {
+                throw new Error(
+                    (result.stderr || result.stdout).trim() || "刷入失败",
+                );
+            }
+            flashNotice.value =
+                (result.stdout || result.stderr).trim() || "刷入完成";
+        } catch (error) {
+            flashError.value =
+                error instanceof Error ? error.message : "刷入失败";
+        } finally {
+            flashRunning.value = false;
+        }
+    }
+
+    // ---------- 网络工具 ----------
+    const showNetworkTools = ref(false);
+    const networkBusy = ref(false);
+    const networkError = ref("");
+    const networkNotice = ref("");
+    const forwardRules = ref("");
+    const mdnsList = ref("");
+    const forwardLocal = ref("");
+    const forwardRemote = ref("");
+    const reverseRemote = ref("");
+    const reverseLocal = ref("");
+    const mdnsAddress = ref("");
+    const proxyValue = ref("");
+
+    async function refreshNetworkTools() {
+        const target = activeSerial.value;
+        if (!target || networkBusy.value) {
+            return;
+        }
+        networkBusy.value = true;
+        networkError.value = "";
+        try {
+            forwardRules.value = await forwardList(target);
+            mdnsList.value = await mdnsServices();
+            proxyValue.value = await getProxy(target);
+        } catch (error) {
+            networkError.value =
+                error instanceof Error ? error.message : "读取网络信息失败";
+        } finally {
+            networkBusy.value = false;
+        }
+    }
+
+    function openNetworkTools() {
+        networkError.value = "";
+        networkNotice.value = "";
+        forwardLocal.value = "";
+        forwardRemote.value = "";
+        reverseRemote.value = "";
+        reverseLocal.value = "";
+        mdnsAddress.value = "";
+        showNetworkTools.value = true;
+        void refreshNetworkTools();
+    }
+
+    function validPort(value: string) {
+        const port = Number(value);
+        return Number.isInteger(port) && port > 0 && port <= 65535;
+    }
+
+    async function networkAction(
+        action: () => Promise<string>,
+        fallback: string,
+    ) {
+        if (networkBusy.value) {
+            return;
+        }
+        networkBusy.value = true;
+        networkError.value = "";
+        networkNotice.value = "";
+        try {
+            networkNotice.value = (await action()) || fallback;
+            networkBusy.value = false;
+            await refreshNetworkTools();
+        } catch (error) {
+            networkError.value =
+                error instanceof Error ? error.message : "操作失败";
+        } finally {
+            networkBusy.value = false;
+        }
+    }
+
+    async function addPortForward() {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        if (!validPort(forwardLocal.value) || !validPort(forwardRemote.value)) {
+            networkError.value = "端口必须是 1-65535 的数字";
+            return;
+        }
+        await networkAction(
+            () => addForward(target, forwardLocal.value, forwardRemote.value),
+            "端口转发已添加",
+        );
+    }
+
+    async function addPortReverse() {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        if (!validPort(reverseRemote.value) || !validPort(reverseLocal.value)) {
+            networkError.value = "端口必须是 1-65535 的数字";
+            return;
+        }
+        await networkAction(
+            () => addReverse(target, reverseRemote.value, reverseLocal.value),
+            "反向转发已添加",
+        );
+    }
+
+    async function removePortForward(localPort: string) {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        await networkAction(
+            () => removeForward(target, localPort),
+            "端口转发已移除",
+        );
+    }
+
+    async function removePortReverse(remotePort: string) {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        await networkAction(
+            () => removeReverse(target, remotePort),
+            "反向转发已移除",
+        );
+    }
+
+    async function removeForwardPrompt() {
+        const value = window.prompt("要移除的电脑端口");
+        if (value && value.trim() !== "") {
+            await removePortForward(value.trim());
+        }
+    }
+
+    async function removeReversePrompt() {
+        const value = window.prompt("要移除的设备端口");
+        if (value && value.trim() !== "") {
+            await removePortReverse(value.trim());
+        }
+    }
+
+    async function connectMdns() {
+        const address = mdnsAddress.value.trim();
+        if (address === "") {
+            networkError.value = "请输入要连接的地址";
+            return;
+        }
+        await networkAction(() => connectDevice(address), "连接完成");
+    }
+
+    async function applyProxy(clear = false) {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        await networkAction(
+            () => setProxy(target, clear ? null : proxyValue.value),
+            clear ? "代理已清除" : "代理已设置",
+        );
+    }
+
+    // ---------- 设备工具 ----------
+    const showDeviceTools = ref(false);
+    const toolsBusy = ref(false);
+    const toolsError = ref("");
+    const toolsNotice = ref("");
+    const display = ref<DisplaySettings | null>(null);
+    const sizeOverride = ref("");
+    const densityOverride = ref("");
+    const animationValue = ref("1");
+    const users = ref<DeviceUser[]>([]);
+    const newUserName = ref("");
+
+    async function refreshDeviceTools() {
+        const target = activeSerial.value;
+        if (!target || toolsBusy.value) {
+            return;
+        }
+        toolsBusy.value = true;
+        toolsError.value = "";
+        try {
+            const [displayResult, userResult] = await Promise.all([
+                getDisplaySettings(target),
+                listUsers(target),
+            ]);
+            display.value = displayResult;
+            users.value = userResult;
+            animationValue.value = displayResult.windowScale || "1";
+        } catch (error) {
+            toolsError.value =
+                error instanceof Error ? error.message : "读取设备设置失败";
+        } finally {
+            toolsBusy.value = false;
+        }
+    }
+
+    function openDeviceTools() {
+        toolsError.value = "";
+        toolsNotice.value = "";
+        sizeOverride.value = "";
+        densityOverride.value = "";
+        newUserName.value = "";
+        showDeviceTools.value = true;
+        void refreshDeviceTools();
+    }
+
+    async function deviceToolAction(
+        action: () => Promise<string>,
+        fallback: string,
+    ) {
+        if (toolsBusy.value) {
+            return;
+        }
+        toolsBusy.value = true;
+        toolsError.value = "";
+        toolsNotice.value = "";
+        try {
+            toolsNotice.value = (await action()) || fallback;
+            toolsBusy.value = false;
+            await refreshDeviceTools();
+        } catch (error) {
+            toolsError.value =
+                error instanceof Error ? error.message : "操作失败";
+        } finally {
+            toolsBusy.value = false;
+        }
+    }
+
+    async function applyDisplaySize() {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        await deviceToolAction(
+            () => setDisplaySize(target, sizeOverride.value.trim() || null),
+            "分辨率已更新",
+        );
+    }
+
+    async function applyDisplayDensity() {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        await deviceToolAction(
+            () =>
+                setDisplayDensity(
+                    target,
+                    densityOverride.value.trim() || null,
+                ),
+            "DPI 已更新",
+        );
+    }
+
+    async function applyAnimationScale() {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        const value = animationValue.value.trim();
+        if (value === "") {
+            toolsError.value = "请输入动画缩放值";
+            return;
+        }
+        toolsBusy.value = true;
+        toolsError.value = "";
+        try {
+            await setAnimationScale(target, "window_animation_scale", value);
+            await setAnimationScale(
+                target,
+                "transition_animation_scale",
+                value,
+            );
+            await setAnimationScale(
+                target,
+                "animator_duration_scale",
+                value,
+            );
+            toolsNotice.value = `动画缩放已设为 ${value}`;
+            toolsBusy.value = false;
+            await refreshDeviceTools();
+        } catch (error) {
+            toolsError.value =
+                error instanceof Error ? error.message : "修改动画缩放失败";
+        } finally {
+            toolsBusy.value = false;
+        }
+    }
+
+    async function toggleStayAwake(enabled: boolean) {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        await deviceToolAction(
+            () => setStayAwake(target, enabled),
+            enabled ? "已保持常亮" : "已取消常亮",
+        );
+    }
+
+    async function sleepDeviceScreen() {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        await deviceToolAction(() => screenOff(target), "屏幕已熄灭");
+    }
+
+    async function addDeviceUser() {
+        const target = activeSerial.value;
+        const name = newUserName.value.trim();
+        if (!target || name === "") {
+            return;
+        }
+        await deviceToolAction(
+            () => createUser(target, name),
+            "用户已创建",
+        );
+        newUserName.value = "";
+    }
+
+    async function switchDeviceUser(userId: string) {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        await deviceToolAction(
+            () => switchUser(target, userId),
+            `已切换到用户 ${userId}`,
+        );
+    }
+
+    async function deleteDeviceUser(user: DeviceUser) {
+        const target = activeSerial.value;
+        if (!target) {
+            return;
+        }
+        if (!window.confirm(`确定删除用户 ${user.name}（${user.id}）吗？`)) {
+            return;
+        }
+        await deviceToolAction(
+            () => removeUser(target, user.id),
+            `已删除用户 ${user.id}`,
+        );
     }
 
     // ---------- FastBoot 变量 ----------
@@ -1909,6 +2894,89 @@
         line-height: 1.5;
         white-space: pre-wrap;
         word-break: break-all;
+    }
+    .tool-section {
+        margin: 16px 0 6px;
+        color: var(--accent);
+        font-size: 13px;
+        text-align: left;
+    }
+    .script-input {
+        box-sizing: border-box;
+        width: 100%;
+        min-height: 110px;
+        margin-bottom: 8px;
+        padding: 8px 10px;
+        border: 1px solid #d1d5db;
+        font-family: Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        resize: vertical;
+    }
+    .script-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 8px;
+        text-align: left;
+    }
+    .script-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .script-load {
+        flex: 1;
+        padding: 4px 8px;
+        overflow: hidden;
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+        color: #374151;
+        font-family: inherit;
+        font-size: 12px;
+        text-align: left;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        cursor: pointer;
+    }
+    .script-delete {
+        flex: none;
+        padding: 4px 8px;
+        border: 1px solid #fecaca;
+        background: #fff;
+        color: #dc2626;
+        font-family: inherit;
+        font-size: 11px;
+        cursor: pointer;
+    }
+    .tool-list {
+        max-height: 180px;
+        padding: 6px 10px;
+        overflow-y: auto;
+        border: 1px solid #e5e7eb;
+        background: #f9fafb;
+    }
+    .tool-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 6px 0;
+        border-bottom: 1px solid #e5e7eb;
+        font-size: 13px;
+        text-align: left;
+    }
+    .tool-row:last-child {
+        border-bottom: none;
+    }
+    .tool-row-actions {
+        display: flex;
+        flex: none;
+        gap: 6px;
+    }
+    .action-pick.danger {
+        border-color: #dc2626;
+        color: #dc2626;
     }
     .preview-dialog {
         width: min(480px, calc(100% - 32px));

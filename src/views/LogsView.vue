@@ -6,8 +6,10 @@ import {
   fetchLogcat,
   joinLocalPath,
   pickDirectory,
+  runDeviceTool,
   runningInTauri,
   saveTextFile,
+  shellQuote,
   startLogcat,
   stopLogcat,
 } from "../services/adb";
@@ -20,6 +22,9 @@ const level = ref<"V" | "D" | "I" | "W" | "E" | "F">("V");
 const keyword = ref("");
 const pidFilter = ref("");
 const tagFilter = ref("");
+const crashOnly = ref(false);
+const packageFilter = ref("");
+const pidLoading = ref(false);
 const streaming = ref(false);
 const autoScroll = ref(true);
 const error = ref("");
@@ -67,9 +72,77 @@ const filteredLines = computed(() => {
     if (tag !== "" && !info.tag.toLowerCase().includes(tag)) {
       return false;
     }
+    if (
+      crashOnly.value &&
+      !/FATAL EXCEPTION|AndroidRuntime|beginning of crash|\bat [\w.$]+\(/.test(
+        line,
+      )
+    ) {
+      return false;
+    }
     return term === "" || line.toLowerCase().includes(term);
   });
 });
+
+const crashCount = computed(
+  () =>
+    rawLines.value.filter((line) =>
+      /FATAL EXCEPTION|beginning of crash/.test(line),
+    ).length,
+);
+
+function escapeHtml(value: string) {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function renderLine(line: string) {
+  const escaped = escapeHtml(line);
+  const term = keyword.value.trim();
+  if (term === "") {
+    return escaped;
+  }
+  return escaped.replace(
+    new RegExp(escapeRegExp(escapeHtml(term)), "gi"),
+    (match) => `<mark>${match}</mark>`,
+  );
+}
+
+async function lookupPid() {
+  const target = serial.value;
+  const packageName = packageFilter.value.trim();
+  if (!target || packageName === "" || pidLoading.value) {
+    return;
+  }
+  pidLoading.value = true;
+  message.value = "";
+  try {
+    const result = await runDeviceTool("adb", [
+      "-s",
+      target,
+      "shell",
+      `pidof ${shellQuote(packageName)}`,
+    ]);
+    const pid = result.stdout.trim().split(/\s+/)[0];
+    if (pid) {
+      pidFilter.value = pid;
+      message.value = `PID: ${pid}`;
+    } else {
+      message.value = "没有找到该应用的运行进程";
+    }
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "获取 PID 失败";
+  } finally {
+    pidLoading.value = false;
+  }
+}
 
 const visibleLines = computed(() =>
   filteredLines.value.slice(-MAX_RENDER_LINES),
@@ -270,6 +343,14 @@ window.addEventListener("pagehide", handlePageHide);
       <input v-model="keyword" class="search" placeholder="关键字" />
       <input v-model="pidFilter" class="small-input" placeholder="PID" />
       <input v-model="tagFilter" class="small-input" placeholder="Tag" />
+      <input v-model="packageFilter" class="small-input" placeholder="包名取 PID" />
+      <button :disabled="pidLoading" @click="lookupPid">
+        {{ pidLoading ? "查询中..." : "取 PID" }}
+      </button>
+      <label class="switch">
+        <input v-model="crashOnly" type="checkbox" />
+        仅崩溃
+      </label>
       <label class="switch">
         <input v-model="autoScroll" type="checkbox" />
         自动滚动
@@ -284,6 +365,9 @@ window.addEventListener("pagehide", handlePageHide);
 
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-if="message" class="message info">{{ message }}</p>
+    <p v-if="crashCount > 0" class="message error">
+      检测到 {{ crashCount }} 条崩溃日志
+    </p>
     <p v-if="!connected" class="muted empty">
       {{
         mode === "fastboot"
@@ -298,9 +382,8 @@ window.addEventListener("pagehide", handlePageHide);
         :key="index"
         class="log-line"
         :class="levelClass(line)"
-      >
-        {{ line }}
-      </div>
+        v-html="renderLine(line)"
+      ></div>
       <p v-if="visibleLines.length === 0" class="log-placeholder">
         {{ streaming ? "等待日志..." : "点击「开始实时」后显示日志" }}
       </p>
@@ -434,6 +517,11 @@ window.addEventListener("pagehide", handlePageHide);
   }
   .log-line.error {
     color: #f87171;
+  }
+  .log-line mark {
+    padding: 0 1px;
+    background: #facc15;
+    color: #111827;
   }
   .log-placeholder {
     margin: 0;

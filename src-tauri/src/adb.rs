@@ -101,6 +101,9 @@ fn allowed_verbs(tool: &str) -> &'static [&'static str] {
             "version",
             "kill-server",
             "start-server",
+            "forward",
+            "reverse",
+            "mdns",
         ],
         "fastboot" => &[
             "devices",
@@ -124,6 +127,14 @@ fn validate_args(tool: &str, args: &[String]) -> Result<(), String> {
             return Err("缺少设备序列号或命令".to_string());
         }
         rest = &rest[2..];
+    }
+
+    // 允许 fastboot 的全局校验开关出现在子命令前
+    while matches!(
+        rest.first().map(String::as_str),
+        Some("--disable-verity") | Some("--disable-verification")
+    ) {
+        rest = &rest[1..];
     }
 
     let verb = rest.first().map(String::as_str).ok_or("缺少命令参数")?;
@@ -455,7 +466,11 @@ fn record_screen_blocking(
 
 // 启动内置 scrcpy 投屏
 #[tauri::command]
-pub fn launch_scrcpy(app: tauri::AppHandle, serial: Option<String>) -> Result<(), String> {
+pub fn launch_scrcpy(
+    app: tauri::AppHandle,
+    serial: Option<String>,
+    record_path: Option<String>,
+) -> Result<(), String> {
     let executable = find_tool_file(&app, "scrcpy.exe")
         .ok_or("未找到内置 scrcpy，请重新安装应用")?;
     let tools = executable.parent().ok_or("scrcpy 目录不存在")?;
@@ -463,6 +478,14 @@ pub fn launch_scrcpy(app: tauri::AppHandle, serial: Option<String>) -> Result<()
     let mut command = Command::new(&executable);
     if let Some(serial) = serial {
         command.args(["-s", &serial]);
+    }
+    if let Some(path) = record_path.filter(|value| !value.trim().is_empty()) {
+        if let Some(parent) = std::path::Path::new(&path).parent() {
+            if !parent.as_os_str().is_empty() && !parent.is_dir() {
+                return Err("录屏保存目录不存在".to_string());
+            }
+        }
+        command.args(["--record", &path]);
     }
     command.current_dir(tools);
     command
@@ -806,8 +829,18 @@ pub async fn read_device_file(
     serial: String,
     path: String,
     max_bytes: u64,
+    root: Option<bool>,
 ) -> Result<FilePreview, String> {
-    run_blocking(move || read_device_file_blocking(&app, &serial, &path, max_bytes)).await
+    run_blocking(move || {
+        read_device_file_blocking(
+            &app,
+            &serial,
+            &path,
+            max_bytes,
+            root.unwrap_or(false),
+        )
+    })
+    .await
 }
 
 fn read_device_file_blocking(
@@ -815,20 +848,26 @@ fn read_device_file_blocking(
     serial: &str,
     path: &str,
     max_bytes: u64,
+    root: bool,
 ) -> Result<FilePreview, String> {
     use base64::Engine;
 
     let adb = tool_executable(app, "adb").ok_or("未找到 tools/adb.exe")?;
     let limit = max_bytes.clamp(1024, 20 * 1024 * 1024);
     let quoted = remote_quote(path);
+    let stat_command = if root {
+        format!("su -c \"stat -c %s {quoted}\"")
+    } else {
+        format!("stat -c %s {quoted}")
+    };
+    let cat_command = if root {
+        format!("su -c \"cat {quoted}\"")
+    } else {
+        format!("cat {quoted}")
+    };
 
     let mut stat = build_command(adb.clone());
-    stat.args([
-        "-s",
-        serial,
-        "shell",
-        &format!("stat -c %s {quoted}"),
-    ]);
+    stat.args(["-s", serial, "shell", &stat_command]);
     if let Ok(output) = run_command(stat, Duration::from_secs(30)) {
         if output.code == Some(0) {
             let size = String::from_utf8_lossy(&output.stdout)
@@ -845,7 +884,7 @@ fn read_device_file_blocking(
     }
 
     let mut command = build_command(adb);
-    command.args(["-s", serial, "exec-out", &format!("cat {quoted}")]);
+    command.args(["-s", serial, "exec-out", &cat_command]);
     let output = run_command(command, Duration::from_secs(60))?;
     if output.code != Some(0) || output.stdout.is_empty() {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -1066,6 +1105,86 @@ fn backup_partition_blocking(
     let _ = run_command(cleanup, Duration::from_secs(30));
 
     Ok(local.display().to_string())
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApkInfo {
+    pub package: String,
+    pub version_name: String,
+    pub version_code: String,
+    pub label: Option<String>,
+    pub sha256: String,
+}
+
+// 检查本地 APK 的包名、版本和 SHA-256
+#[tauri::command]
+pub async fn inspect_apk(path: String) -> Result<ApkInfo, String> {
+    run_blocking(move || inspect_apk_blocking(&path)).await
+}
+
+fn inspect_apk_blocking(path: &str) -> Result<ApkInfo, String> {
+    use apk_info_axml::{ARSC, AXML};
+    use sha2::{Digest, Sha256};
+    use zip::ZipArchive;
+
+    let file = fs::File::open(path).map_err(|error| format!("打开 APK 失败: {error}"))?;
+    let mut archive = ZipArchive::new(file).map_err(|error| format!("解析 APK 失败: {error}"))?;
+
+    let mut manifest = Vec::new();
+    archive
+        .by_name("AndroidManifest.xml")
+        .map_err(|_| "APK 中没有 AndroidManifest.xml".to_string())?
+        .read_to_end(&mut manifest)
+        .map_err(|error| format!("读取清单失败: {error}"))?;
+
+    let mut arsc_bytes = Vec::new();
+    if let Ok(mut entry) = archive.by_name("resources.arsc") {
+        let _ = entry.read_to_end(&mut arsc_bytes);
+    }
+    let arsc = if arsc_bytes.is_empty() {
+        None
+    } else {
+        ARSC::new(&mut arsc_bytes.as_slice()).ok()
+    };
+
+    let mut manifest_slice = manifest.as_slice();
+    let axml = AXML::new(&mut manifest_slice, arsc.as_ref())
+        .map_err(|error| format!("解析清单失败: {error}"))?;
+
+    let package = axml
+        .get_attribute_value("manifest", "package", arsc.as_ref())
+        .unwrap_or_default();
+    let version_name = axml
+        .get_attribute_value("manifest", "versionName", arsc.as_ref())
+        .unwrap_or_default();
+    let version_code = axml
+        .get_attribute_value("manifest", "versionCode", arsc.as_ref())
+        .unwrap_or_default();
+    let label = axml
+        .get_attribute_value("application", "label", arsc.as_ref())
+        .filter(|value| !value.starts_with('@'));
+
+    let mut hasher = Sha256::new();
+    let mut hashed = fs::File::open(path).map_err(|error| format!("读取 APK 失败: {error}"))?;
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let read = hashed
+            .read(&mut buffer)
+            .map_err(|error| format!("计算 SHA-256 失败: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..read]);
+    }
+
+    Ok(ApkInfo {
+        package,
+        version_name,
+        version_code,
+        label,
+        sha256: format!("{:x}", hasher.finalize()),
+    })
 }
 
 // 停止 adb 服务，避免程序退出后后台残留 adb 进程

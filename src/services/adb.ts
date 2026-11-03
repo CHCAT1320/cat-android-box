@@ -662,12 +662,14 @@ export function parseLsLine(
 export async function listDirectory(
   serial: string,
   directory: string,
+  root = false,
 ): Promise<FileEntry[]> {
   // 末尾加 /，确保符号链接目录（如 /sdcard）列出的是内容而不是链接本身
   const target = directory.endsWith("/") ? directory : `${directory}/`;
+  const listing = `ls -laL ${shellQuote(target)}`;
   const result = await runChecked(serial, [
     "shell",
-    `ls -laL ${shellQuote(target)}`,
+    root ? `su -c ${shellQuote(listing)}` : listing,
   ]);
   return result.stdout
     .split(/\r?\n/)
@@ -834,11 +836,14 @@ export async function recordScreen(
 }
 
 // 启动 scrcpy 投屏（需要 tools/scrcpy.exe）
-export async function launchScrcpy(serial: string | null): Promise<void> {
+export async function launchScrcpy(
+  serial: string | null,
+  recordPath: string | null = null,
+): Promise<void> {
   if (!inTauri) {
     throw new Error("浏览器开发模式不支持 scrcpy");
   }
-  await invoke("launch_scrcpy", { serial });
+  await invoke("launch_scrcpy", { serial, recordPath });
 }
 
 // 安装 APK / APKS / XAPK
@@ -863,6 +868,7 @@ export async function readDeviceFile(
   serial: string,
   path: string,
   maxBytes = 8 * 1024 * 1024,
+  root = false,
 ): Promise<FilePreview> {
   if (!inTauri) {
     throw new Error("浏览器开发模式不支持文件预览");
@@ -871,6 +877,7 @@ export async function readDeviceFile(
     serial,
     path,
     maxBytes,
+    root,
   });
 }
 
@@ -1011,6 +1018,387 @@ export async function swipeScreen(
       x2,
     )} ${Math.round(y2)} ${duration}`,
   ]);
+}
+
+export interface ApkInfo {
+  package: string;
+  versionName: string;
+  versionCode: string;
+  label: string | null;
+  sha256: string;
+}
+
+export async function inspectApk(path: string): Promise<ApkInfo> {
+  if (!inTauri) {
+    throw new Error("浏览器开发模式不支持 APK 检查");
+  }
+  return invoke<ApkInfo>("inspect_apk", { path });
+}
+
+export async function grantPermission(
+  serial: string,
+  packageName: string,
+  permission: string,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `pm grant ${shellQuote(packageName)} ${shellQuote(permission)}`,
+  ]);
+  return result.stdout.trim() || "已授予";
+}
+
+export async function revokePermission(
+  serial: string,
+  packageName: string,
+  permission: string,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `pm revoke ${shellQuote(packageName)} ${shellQuote(permission)}`,
+  ]);
+  return result.stdout.trim() || "已撤销";
+}
+
+export interface DeviceUser {
+  id: string;
+  name: string;
+  current: boolean;
+}
+
+export async function listUsers(serial: string): Promise<DeviceUser[]> {
+  const result = await runChecked(serial, ["shell", "pm list users"]);
+  let current = "0";
+  try {
+    const currentResult = await runChecked(serial, [
+      "shell",
+      "am get-current-user",
+    ]);
+    current = currentResult.stdout.trim();
+  } catch {
+    // 旧系统可能不支持 get-current-user
+  }
+  const users: DeviceUser[] = [];
+  for (const match of result.stdout.matchAll(/UserInfo\{(\d+):([^:}]+)/g)) {
+    users.push({
+      id: match[1],
+      name: match[2],
+      current: match[1] === current,
+    });
+  }
+  return users;
+}
+
+export async function switchUser(
+  serial: string,
+  userId: string,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `am switch-user ${userId}`,
+  ]);
+  return result.stdout.trim() || `已切换到用户 ${userId}`;
+}
+
+export async function createUser(
+  serial: string,
+  name: string,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `pm create-user ${shellQuote(name)}`,
+  ]);
+  return result.stdout.trim() || "用户已创建";
+}
+
+export async function removeUser(
+  serial: string,
+  userId: string,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `pm remove-user ${userId}`,
+  ]);
+  return result.stdout.trim() || `已删除用户 ${userId}`;
+}
+
+export interface DisplaySettings {
+  size: string;
+  density: string;
+  windowScale: string;
+  transitionScale: string;
+  animatorScale: string;
+}
+
+export async function getDisplaySettings(
+  serial: string,
+): Promise<DisplaySettings> {
+  const script = [
+    "echo __SIZE__",
+    "wm size",
+    "echo __DENSITY__",
+    "wm density",
+    "echo __W__",
+    "settings get global window_animation_scale",
+    "echo __T__",
+    "settings get global transition_animation_scale",
+    "echo __A__",
+    "settings get global animator_duration_scale",
+  ].join("; ");
+  const result = await runChecked(serial, ["shell", script]);
+  const output = result.stdout;
+  const section = (key: string) => {
+    const match = output.match(
+      new RegExp(`__${key}__\\s*\\r?\\n([\\s\\S]*?)(?=\\r?\\n__|$)`),
+    );
+    return match?.[1]?.trim() ?? "-";
+  };
+  return {
+    size: section("SIZE"),
+    density: section("DENSITY"),
+    windowScale: section("W"),
+    transitionScale: section("T"),
+    animatorScale: section("A"),
+  };
+}
+
+export async function setDisplaySize(
+  serial: string,
+  size: string | null,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `wm size ${size ?? "reset"}`,
+  ]);
+  return result.stdout.trim() || "显示分辨率已更新";
+}
+
+export async function setDisplayDensity(
+  serial: string,
+  density: string | null,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `wm density ${density ?? "reset"}`,
+  ]);
+  return result.stdout.trim() || "DPI 已更新";
+}
+
+export type AnimationScaleKey =
+  | "window_animation_scale"
+  | "transition_animation_scale"
+  | "animator_duration_scale";
+
+export async function setAnimationScale(
+  serial: string,
+  key: AnimationScaleKey,
+  value: string,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `settings put global ${key} ${value}`,
+  ]);
+  return result.stdout.trim() || "动画缩放已更新";
+}
+
+export async function setStayAwake(
+  serial: string,
+  enabled: boolean,
+): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    `svc power stayon ${enabled ? "true" : "false"}`,
+  ]);
+  return result.stdout.trim() || (enabled ? "已保持常亮" : "已取消常亮");
+}
+
+export async function screenOff(serial: string): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    "input keyevent 223",
+  ]);
+  return result.stdout.trim() || "屏幕已熄灭";
+}
+
+export async function forwardList(serial: string): Promise<string> {
+  const result = await runDeviceTool("adb", [
+    "-s",
+    serial,
+    "forward",
+    "--list",
+  ]);
+  return (result.stdout || result.stderr).trim() || "没有端口转发规则";
+}
+
+export async function addForward(
+  serial: string,
+  localPort: string,
+  remotePort: string,
+): Promise<string> {
+  const result = await runDeviceTool("adb", [
+    "-s",
+    serial,
+    "forward",
+    `tcp:${localPort}`,
+    `tcp:${remotePort}`,
+  ]);
+  return commandResult(result, "端口转发已添加");
+}
+
+export async function removeForward(
+  serial: string,
+  localPort: string,
+): Promise<string> {
+  const result = await runDeviceTool("adb", [
+    "-s",
+    serial,
+    "forward",
+    "--remove",
+    `tcp:${localPort}`,
+  ]);
+  return commandResult(result, "端口转发已移除");
+}
+
+export async function addReverse(
+  serial: string,
+  remotePort: string,
+  localPort: string,
+): Promise<string> {
+  const result = await runDeviceTool("adb", [
+    "-s",
+    serial,
+    "reverse",
+    `tcp:${remotePort}`,
+    `tcp:${localPort}`,
+  ]);
+  return commandResult(result, "反向转发已添加");
+}
+
+export async function removeReverse(
+  serial: string,
+  remotePort: string,
+): Promise<string> {
+  const result = await runDeviceTool("adb", [
+    "-s",
+    serial,
+    "reverse",
+    "--remove",
+    `tcp:${remotePort}`,
+  ]);
+  return commandResult(result, "反向转发已移除");
+}
+
+export async function mdnsServices(): Promise<string> {
+  const result = await runDeviceTool("adb", ["mdns", "services"]);
+  return (result.stdout || result.stderr).trim() || "没有发现无线调试服务";
+}
+
+export async function connectDevice(address: string): Promise<string> {
+  const result = await runDeviceTool("adb", ["connect", address.trim()]);
+  return commandResult(result, "连接完成");
+}
+
+export async function getProxy(serial: string): Promise<string> {
+  const result = await runChecked(serial, [
+    "shell",
+    "settings get global http_proxy",
+  ]);
+  const value = result.stdout.trim();
+  return value === "" || value === "null" || value === ":0" ? "" : value;
+}
+
+export async function setProxy(
+  serial: string,
+  proxy: string | null,
+): Promise<string> {
+  const value = proxy && proxy.trim() !== "" ? proxy.trim() : ":0";
+  const result = await runChecked(serial, [
+    "shell",
+    `settings put global http_proxy ${shellQuote(value)}`,
+  ]);
+  return result.stdout.trim() || (value === ":0" ? "代理已清除" : "代理已设置");
+}
+
+export interface FileChecksums {
+  md5: string;
+  sha256: string;
+}
+
+export async function checksumFile(
+  serial: string,
+  path: string,
+  root = false,
+): Promise<FileChecksums> {
+  const command = `md5sum ${shellQuote(path)}; sha256sum ${shellQuote(path)}`;
+  const result = await runChecked(serial, [
+    "shell",
+    root ? `su -c ${shellQuote(command)}` : command,
+  ]);
+  const md5 = result.stdout.match(/([a-f0-9]{32})/i)?.[1] ?? "-";
+  const sha256 = result.stdout.match(/([a-f0-9]{64})/i)?.[1] ?? "-";
+  return { md5, sha256 };
+}
+
+export async function writeDeviceFile(
+  serial: string,
+  path: string,
+  content: string,
+  root = false,
+): Promise<string> {
+  const bytes = new TextEncoder().encode(content);
+  let binary = "";
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+  const base64 = btoa(binary);
+  const command = `echo ${shellQuote(base64)} | base64 -d > ${shellQuote(path)}`;
+  const result = await runChecked(serial, [
+    "shell",
+    root ? `su -c ${shellQuote(command)}` : command,
+  ]);
+  return result.stdout.trim() || "已保存";
+}
+
+export async function extractArchive(
+  serial: string,
+  archivePath: string,
+  destination: string,
+  root = false,
+): Promise<string> {
+  const command = `unzip -o ${shellQuote(archivePath)} -d ${shellQuote(destination)}`;
+  const result = await runChecked(serial, [
+    "shell",
+    root ? `su -c ${shellQuote(command)}` : command,
+  ]);
+  return result.stdout.trim() || "已解压";
+}
+
+export async function compressPaths(
+  serial: string,
+  paths: string[],
+  archivePath: string,
+  root = false,
+): Promise<string> {
+  if (paths.length === 0) {
+    throw new Error("没有要打包的文件");
+  }
+  const files = paths.map((item) => shellQuote(item)).join(" ");
+  const command = `tar -cf ${shellQuote(archivePath)} ${files}`;
+  const result = await runChecked(serial, [
+    "shell",
+    root ? `su -c ${shellQuote(command)}` : command,
+  ]);
+  return result.stdout.trim() || "已打包";
+}
+
+function commandResult(
+  result: { code: number | null; stdout: string; stderr: string },
+  fallback: string,
+): string {
+  const output = (result.stdout || result.stderr).trim();
+  if (result.code !== null && result.code !== 0) {
+    throw new Error(output || fallback);
+  }
+  return output || fallback;
 }
 
 export function joinLocalPath(directory: string, name: string): string {
