@@ -243,9 +243,16 @@
 
                     <div v-if="actionOutput" class="output-panel">
                         <pre>{{ actionOutput }}</pre>
-                        <button class="copy-button" @click="copyOutput">
-                            复制输出
-                        </button>
+                        <div class="output-actions">
+                            <button class="copy-button" @click="copyOutput">
+                                复制输出
+                            </button>
+                            <p class="copy-hint">
+                                复制后可发给大佬排查，或粘贴给 DeepSeek / Kimi /
+                                ChatGPT / Claude / Gemini 等 AI
+                                咨询（豆包除外）。
+                            </p>
+                        </div>
                     </div>
 
                     <div class="dialog-actions">
@@ -1560,6 +1567,14 @@ import { settings } from "../services/settings";
         }
     }
 
+    // 退出码 0 表示命令成功，非 0 表示失败，无法获取时标记未知
+    function exitCodeStatus(code: number | null): string {
+        if (code === null) {
+            return "未知";
+        }
+        return code === 0 ? "成功" : "失败";
+    }
+
     function formatOutput(
         action: DeviceAction,
         args: string[],
@@ -1573,7 +1588,10 @@ import { settings } from "../services/settings";
             parts.push("", "[stderr]", result.stderr.trimEnd());
         }
         if (result.code !== null) {
-            parts.push("", `[exit code: ${result.code}]`);
+            parts.push(
+                "",
+                `[exit code: ${result.code}]（${exitCodeStatus(result.code)}）`,
+            );
         }
         return parts.join("\n");
     }
@@ -1738,10 +1756,11 @@ import { settings } from "../services/settings";
                     "shell",
                     command,
                 ]);
-                const output =
-                    (result.stdout || result.stderr).trim() ||
-                    `[exit code: ${result.code ?? "-"}]`;
-                parts.push(`# ${target}\n${output}`);
+                const output = (result.stdout || result.stderr).trim();
+                const status = `[exit code: ${result.code ?? "-"}]（${exitCodeStatus(result.code)}）`;
+                parts.push(
+                    `# ${target}\n${output ? `${output}\n` : ""}${status}`,
+                );
             } catch (error) {
                 failed.push(target);
                 parts.push(
@@ -3549,6 +3568,23 @@ import { settings } from "../services/settings";
         line-height: 1.5;
         white-space: pre-wrap;
         word-break: break-all;
+    }
+    .output-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        align-items: center;
+        margin-top: 8px;
+    }
+    .output-actions .copy-button {
+        margin-top: 0;
+        flex: none;
+    }
+    .copy-hint {
+        color: #6b7280 !important;
+        font-size: 12px;
+        line-height: 1.5;
+        text-align: left;
     }
     .copy-button {
         height: 30px;

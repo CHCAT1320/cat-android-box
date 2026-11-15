@@ -13,6 +13,14 @@ import {
   startLogcat,
   stopLogcat,
 } from "../services/adb";
+import {
+  countCrashMarkers,
+  extractCrashes,
+  extractWarnings,
+  parseLogLine as parseLine,
+  type CrashEvent,
+  type WarningEvent,
+} from "../services/logcat";
 import { settings } from "../services/settings";
 
 const { serial, mode, modeLabel, connected } = useConnectedDevice();
@@ -45,17 +53,6 @@ const LEVEL_ORDER: Record<string, number> = {
   F: 5,
 };
 
-function parseLine(line: string) {
-  const match = line.match(
-    /^\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+\s+(\d+)\s+(\d+)\s+([VDIWEF])\s+([^:]+):/,
-  );
-  return {
-    pid: match?.[1] ?? "",
-    level: match?.[3] ?? "",
-    tag: match?.[4]?.trim() ?? "",
-  };
-}
-
 const filteredLines = computed(() => {
   const term = keyword.value.trim().toLowerCase();
   const pid = pidFilter.value.trim();
@@ -74,7 +71,7 @@ const filteredLines = computed(() => {
     }
     if (
       crashOnly.value &&
-      !/FATAL EXCEPTION|AndroidRuntime|beginning of crash|\bat [\w.$]+\(/.test(
+      !/FATAL EXCEPTION|AndroidRuntime|beginning of crash|Fatal signal|ANR in|pid:\s*\d+|PID:\s*\d+|Cmdline:|>>>|Process:.*PID:|\bat [\w.$]+\(/.test(
         line,
       )
     ) {
@@ -84,12 +81,127 @@ const filteredLines = computed(() => {
   });
 });
 
-const crashCount = computed(
-  () =>
-    rawLines.value.filter((line) =>
-      /FATAL EXCEPTION|beginning of crash/.test(line),
-    ).length,
-);
+const crashEvents = ref<CrashEvent[]>([]);
+const crashMarkerCount = computed(() => countCrashMarkers(rawLines.value));
+const seenCrashKeys = new Map<string, CrashEvent>();
+
+function crashKey(event: CrashEvent): string {
+  return event.time !== "" && event.pid !== ""
+    ? `${event.time}|${event.pid}`
+    : `${event.time}|${event.app}|${event.reason}`;
+}
+
+function mergeCrashEvents(events: CrashEvent[]) {
+  for (const event of events) {
+    const key = crashKey(event);
+    const existing = seenCrashKeys.get(key);
+    if (existing) {
+      if (existing.app === "未知进程" && event.app !== "未知进程") {
+        existing.app = event.app;
+      }
+      if (existing.pid === "" && event.pid !== "") {
+        existing.pid = event.pid;
+      }
+      if (existing.reason === "ANR" && event.reason !== "ANR") {
+        existing.reason = event.reason;
+      }
+      continue;
+    }
+    crashEvents.value.push(event);
+    seenCrashKeys.set(
+      key,
+      crashEvents.value[crashEvents.value.length - 1],
+    );
+  }
+  if (crashEvents.value.length > 200) {
+    const removed = crashEvents.value.splice(
+      0,
+      crashEvents.value.length - 200,
+    );
+    for (const event of removed) {
+      seenCrashKeys.delete(crashKey(event));
+    }
+  }
+}
+
+function resetCrashEvents() {
+  crashEvents.value = [];
+  seenCrashKeys.clear();
+}
+
+const warningEvents = ref<WarningEvent[]>([]);
+const showWarnings = ref(false);
+const seenWarningKeys = new Set<string>();
+
+function mergeWarnings(warnings: WarningEvent[]) {
+  for (const warning of warnings) {
+    if (seenWarningKeys.has(warning.id)) {
+      continue;
+    }
+    seenWarningKeys.add(warning.id);
+    warningEvents.value.push(warning);
+  }
+  if (warningEvents.value.length > 200) {
+    const removed = warningEvents.value.splice(
+      0,
+      warningEvents.value.length - 200,
+    );
+    for (const warning of removed) {
+      seenWarningKeys.delete(warning.id);
+    }
+  }
+}
+
+function resetWarnings() {
+  warningEvents.value = [];
+  seenWarningKeys.clear();
+  showWarnings.value = false;
+}
+
+function focusWarning(warning: WarningEvent) {
+  const present = rawLines.value.some(
+    (line) =>
+      (warning.time !== "" && line.includes(warning.time)) ||
+      (warning.time === "" && line.includes(warning.tag)),
+  );
+  if (!present) {
+    message.value =
+      "该警告摘要仍保留，但原始日志已超出 3000 行缓冲，无法再定位到具体行";
+    return;
+  }
+
+  crashOnly.value = false;
+  level.value = "W";
+  pidFilter.value = warning.pid;
+  tagFilter.value = warning.tag;
+  message.value = `已筛选警告：${warning.tag || "未知 Tag"}`;
+}
+
+function focusCrash(crash: CrashEvent) {
+  const present = rawLines.value.some(
+    (line) =>
+      (crash.time !== "" && line.includes(crash.time)) ||
+      (crash.time === "" &&
+        (line.includes(crash.app) ||
+          (crash.pid !== "" && line.includes(crash.pid)))),
+  );
+  if (!present) {
+    message.value =
+      "该崩溃摘要仍保留，但原始日志已超出 3000 行缓冲，无法再定位到具体行";
+    return;
+  }
+
+  crashOnly.value = true;
+  if (crash.pid !== "") {
+    pidFilter.value = crash.pid;
+  } else if (crash.app !== "未知进程") {
+    keyword.value = crash.app;
+  }
+  message.value =
+    crash.app === "未知进程"
+      ? "该崩溃未解析出进程，请继续复现或重新开始抓取"
+      : `已筛选崩溃进程：${crash.app}${crash.pid ? `（PID ${crash.pid}）` : ""}`;
+}
 
 function escapeHtml(value: string) {
   return value
@@ -163,10 +275,11 @@ function appendBatch(batch: string[]) {
   if (batch.length === 0) {
     return;
   }
-  rawLines.value.push(...batch);
-  if (rawLines.value.length > MAX_LINES) {
-    rawLines.value.splice(0, rawLines.value.length - MAX_LINES);
-  }
+  const context = rawLines.value.slice(-40);
+  const combined = rawLines.value.concat(batch);
+  mergeCrashEvents(extractCrashes(context.concat(batch)));
+  mergeWarnings(extractWarnings(batch));
+  rawLines.value = combined.slice(-MAX_LINES);
   if (autoScroll.value) {
     void nextTick(() => {
       if (logBox.value) {
@@ -182,6 +295,8 @@ async function start() {
     return;
   }
   rawLines.value = [];
+  resetCrashEvents();
+  resetWarnings();
   error.value = "";
   message.value = "";
   streaming.value = true;
@@ -195,7 +310,10 @@ async function start() {
       }
       try {
         const text = await fetchLogcat(targetSerial, 1000);
-        rawLines.value = text.split(/\r?\n/).filter(Boolean).slice(-MAX_LINES);
+        const lines = text.split(/\r?\n/).filter(Boolean);
+        mergeCrashEvents(extractCrashes(lines));
+        mergeWarnings(extractWarnings(lines));
+        rawLines.value = lines.slice(-MAX_LINES);
       } catch (caught) {
         error.value = caught instanceof Error ? caught.message : "读取日志失败";
       }
@@ -239,6 +357,8 @@ async function stop() {
 
 function clearLog() {
   rawLines.value = [];
+  resetCrashEvents();
+  resetWarnings();
   message.value = "";
 }
 
@@ -365,9 +485,58 @@ window.addEventListener("pagehide", handlePageHide);
 
     <p v-if="error" class="message error">{{ error }}</p>
     <p v-if="message" class="message info">{{ message }}</p>
-    <p v-if="crashCount > 0" class="message error">
-      检测到 {{ crashCount }} 条崩溃日志
+    <div v-if="crashEvents.length > 0" class="crash-summary">
+      <div class="crash-title">
+        检测到 {{ crashEvents.length }} 次崩溃，点击可筛选
+      </div>
+      <button
+        v-for="crash in crashEvents"
+        :key="crash.id"
+        type="button"
+        class="crash-item"
+        @click="focusCrash(crash)"
+      >
+        <span class="crash-app">{{ crash.app }}</span>
+        <span class="crash-meta">
+          <template v-if="crash.pid">PID {{ crash.pid }}</template>
+          <template v-if="crash.pid && crash.reason"> · </template>
+          {{ crash.reason }}
+        </span>
+        <span v-if="crash.time" class="crash-time">{{ crash.time }}</span>
+      </button>
+    </div>
+    <p v-else-if="crashMarkerCount > 0" class="message error">
+      检测到 {{ crashMarkerCount }} 条崩溃标记，但当前日志中未解析出崩溃进程；请保持复现或重新开始抓取。
     </p>
+
+    <div v-if="warningEvents.length > 0" class="warning-summary">
+      <div class="warning-title">
+        <span>已保留 {{ warningEvents.length }} 条警告（超出缓冲后仍会保留）</span>
+        <button
+          class="warning-toggle"
+          type="button"
+          @click="showWarnings = !showWarnings"
+        >
+          {{ showWarnings ? "收起" : "展开" }}
+        </button>
+      </div>
+      <div v-if="showWarnings" class="warning-list">
+        <button
+          v-for="warning in warningEvents"
+          :key="warning.id"
+          type="button"
+          class="warning-item"
+          @click="focusWarning(warning)"
+        >
+          <span class="warning-time">{{ warning.time }}</span>
+          <span class="warning-tag">{{ warning.tag }}</span>
+          <span class="warning-message">{{ warning.message }}</span>
+          <span v-if="warning.pid" class="warning-pid">
+            PID {{ warning.pid }}
+          </span>
+        </button>
+      </div>
+    </div>
     <p v-if="!connected" class="muted empty">
       {{
         mode === "fastboot"
@@ -476,6 +645,121 @@ window.addEventListener("pagehide", handlePageHide);
   }
   .small-input {
     width: 110px;
+  }
+  .crash-summary {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid #fecaca;
+    background: #fef2f2;
+    text-align: left;
+  }
+  .crash-title {
+    margin-bottom: 6px;
+    color: #b91c1c;
+    font-size: 13px;
+  }
+  .crash-item {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 10px;
+    align-items: baseline;
+    width: 100%;
+    padding: 6px 8px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #7f1d1d;
+    font-family: inherit;
+    text-align: left;
+  }
+  .crash-item:hover {
+    border-color: #fecaca;
+    background: #fff;
+  }
+  .crash-app {
+    color: #b91c1c;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    word-break: break-all;
+  }
+  .crash-meta {
+    color: #7f1d1d;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    word-break: break-all;
+  }
+  .crash-time {
+    color: #991b1b;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    opacity: 0.7;
+  }
+  .warning-summary {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid #fde68a;
+    background: #fffbeb;
+    text-align: left;
+  }
+  .warning-title {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    justify-content: space-between;
+    color: #92400e;
+    font-size: 13px;
+  }
+  .warning-toggle {
+    padding: 0;
+    border: none;
+    background: none;
+    color: #b45309;
+    font-family: inherit;
+    font-size: var(--control-font-sm);
+    text-decoration: underline;
+  }
+  .warning-list {
+    max-height: 260px;
+    margin-top: 8px;
+    overflow: auto;
+  }
+  .warning-item {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+    align-items: baseline;
+    width: 100%;
+    padding: 5px 6px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: #78350f;
+    font-family: inherit;
+    text-align: left;
+  }
+  .warning-item:hover {
+    border-color: #fde68a;
+    background: #fff;
+  }
+  .warning-time,
+  .warning-pid {
+    color: #a16207;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    opacity: 0.8;
+  }
+  .warning-tag {
+    color: #92400e;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .warning-message {
+    flex: 1 1 220px;
+    color: #78350f;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    word-break: break-all;
   }
   .message {
     margin: 10px 0 0;
