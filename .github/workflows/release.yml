@@ -73,9 +73,43 @@ jobs:
 
             - `*-setup.exe`：NSIS 安装包
             - `*.msi`：MSI 安装包
+            - `*_portable.zip`：免安装便携版，解压后直接运行 exe
 
             运行环境：Windows 10 / 11（需要 WebView2，系统通常已自带）。
 
             刷机、清空账号/用户、清除设备管理员等操作有数据丢失风险，请先备份。
           releaseDraft: true
           prerelease: false
+
+      - name: Create portable zip
+        id: portable
+        shell: pwsh
+        run: |
+          $version = "${{ steps.release.outputs.tag }}"
+          $version = $version -replace '^v', ''
+          $root = Join-Path $env:RUNNER_TEMP "cat-android-box-portable"
+          $app = Join-Path $root "cat-android-box"
+          New-Item -ItemType Directory -Force -Path (Join-Path $app "tools") | Out-Null
+          New-Item -ItemType Directory -Force -Path (Join-Path $app "licenses") | Out-Null
+
+          Copy-Item "src-tauri/target/release/cat-android-box.exe" $app
+          if (Test-Path "src-tauri/target/release/tools") {
+            Copy-Item "src-tauri/target/release/tools/*" (Join-Path $app "tools") -Recurse -Force
+          } else {
+            Copy-Item "tools/*" (Join-Path $app "tools") -Recurse -Force
+          }
+          Copy-Item "src/assets/fonts/OFL.txt" (Join-Path $app "licenses/JetBrainsMono-OFL.txt")
+          Copy-Item "src/assets/fonts/NotoSansSC-OFL.txt" (Join-Path $app "licenses/NotoSansSC-OFL.txt")
+          Copy-Item "tools/LICENSE-scrcpy.txt" (Join-Path $app "licenses/scrcpy-LICENSE.txt")
+
+          $zip = "cat-android-box_${version}_x64-portable.zip"
+          Compress-Archive -Path $app -DestinationPath $zip -Force
+          "path=$zip" >> $env:GITHUB_OUTPUT
+
+      - name: Upload portable zip
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "${{ github.event_name == 'push' && github.ref_name || steps.release.outputs.tag }}"
+          gh release upload "$tag" "${{ steps.portable.outputs.path }}" --clobber
