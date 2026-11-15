@@ -23,6 +23,7 @@ import {
   type AppEntry,
   type AppMetadata,
 } from "../services/adb";
+import { confirmDialog } from "../services/dialogs";
 import { describePermission } from "../services/permissions";
 import { settings } from "../services/settings";
 
@@ -263,7 +264,14 @@ async function batchRemove() {
   if (!target || items.length === 0) {
     return;
   }
-  if (!window.confirm(`确定卸载选中的 ${items.length} 个应用吗？`)) {
+  if (
+    !(await confirmDialog({
+      title: "批量卸载",
+      message: `确定卸载选中的 ${items.length} 个应用吗？`,
+      confirmText: "卸载",
+      danger: true,
+    }))
+  ) {
     return;
   }
   batchProgress.value = { done: 0, total: items.length };
@@ -292,7 +300,13 @@ async function batchToggle(enabled: boolean) {
     return;
   }
   const action = enabled ? "启用" : "停用";
-  if (!window.confirm(`确定${action}选中的 ${items.length} 个应用吗？`)) {
+  if (
+    !(await confirmDialog({
+      title: `批量${action}`,
+      message: `确定${action}选中的 ${items.length} 个应用吗？`,
+      confirmText: action,
+    }))
+  ) {
     return;
   }
   batchProgress.value = { done: 0, total: items.length };
@@ -469,7 +483,12 @@ async function togglePermission(permission: string, granted: boolean) {
   }
   if (
     granted &&
-    !window.confirm(`确定撤销 ${permission} 的授权吗？`)
+    !(await confirmDialog({
+      title: "撤销权限",
+      message: `确定撤销 ${permission} 的授权吗？`,
+      confirmText: "撤销",
+      danger: true,
+    }))
   ) {
     return;
   }
@@ -502,7 +521,14 @@ async function clearData() {
   if (!target || !app) {
     return;
   }
-  if (!window.confirm(`确定清除 ${app.packageName} 的全部数据吗？`)) {
+  if (
+    !(await confirmDialog({
+      title: "清除数据",
+      message: `确定清除 ${app.packageName} 的全部数据吗？此操作不可恢复。`,
+      confirmText: "清除",
+      danger: true,
+    }))
+  ) {
     return;
   }
   detailWorking.value = true;
@@ -563,7 +589,13 @@ async function toggleApp(app: AppEntry) {
     return;
   }
   const action = app.disabled ? "启用" : "停用";
-  if (!window.confirm(`确定要${action} ${app.packageName} 吗？`)) {
+  if (
+    !(await confirmDialog({
+      title: `${action}应用`,
+      message: `确定要${action} ${app.packageName} 吗？`,
+      confirmText: action,
+    }))
+  ) {
     return;
   }
   working.value = app.packageName;
@@ -584,7 +616,14 @@ async function removeApp(app: AppEntry) {
     return;
   }
   const hint = app.system ? "（仅对当前用户卸载）" : "";
-  if (!window.confirm(`确定要卸载 ${app.packageName}${hint} 吗？`)) {
+  if (
+    !(await confirmDialog({
+      title: "卸载应用",
+      message: `确定要卸载 ${app.packageName}${hint} 吗？`,
+      confirmText: "卸载",
+      danger: true,
+    }))
+  ) {
     return;
   }
   working.value = app.packageName;

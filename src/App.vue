@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
+import DialogHost from "./components/DialogHost.vue";
 import { resolveAccent, settings } from "./services/settings";
 
 const accent = ref(resolveAccent());
@@ -102,6 +103,7 @@ onBeforeUnmount(() => {
         </Transition>
       </RouterView>
     </main>
+    <DialogHost />
   </div>
 </template>
 

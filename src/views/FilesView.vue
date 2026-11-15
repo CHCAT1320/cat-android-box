@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useConnectedDevice } from "../composables/useConnectedDevice";
 import CodeEditor from "../components/CodeEditor.vue";
+import { confirmDialog, promptDialog } from "../services/dialogs";
 import {
   checksumFile,
   compressPaths,
@@ -363,7 +364,12 @@ async function makeDirectory() {
   if (!target) {
     return;
   }
-  const name = window.prompt("新建文件夹名称");
+  const name = await promptDialog({
+    title: "新建文件夹",
+    message: "请输入文件夹名称",
+    placeholder: "文件夹名称",
+    confirmText: "创建",
+  });
   if (!name || name.includes("/")) {
     return;
   }
@@ -387,7 +393,12 @@ async function rename(entry: FileEntry) {
   if (!target) {
     return;
   }
-  const name = window.prompt("新的名称", entry.name);
+  const name = await promptDialog({
+    title: "重命名",
+    message: `将 ${entry.name} 重命名为：`,
+    value: entry.name,
+    confirmText: "重命名",
+  });
   if (!name || name === entry.name || name.includes("/")) {
     return;
   }
@@ -412,7 +423,14 @@ async function remove(entry: FileEntry) {
   if (!target) {
     return;
   }
-  if (!window.confirm(`确定要删除 ${entry.name} 吗？文件夹会连同内容一起删除。`)) {
+  if (
+    !(await confirmDialog({
+      title: entry.isDir ? "删除文件夹" : "删除文件",
+      message: `确定要删除 ${entry.name} 吗？文件夹会连同内容一起删除。`,
+      confirmText: "删除",
+      danger: true,
+    }))
+  ) {
     return;
   }
   working.value = entry.path;
@@ -441,9 +459,12 @@ async function batchDelete() {
     return;
   }
   if (
-    !window.confirm(
-      `确定删除选中的 ${items.length} 项吗？文件夹会连同内容一起删除。`,
-    )
+    !(await confirmDialog({
+      title: "批量删除",
+      message: `确定删除选中的 ${items.length} 项吗？文件夹会连同内容一起删除。`,
+      confirmText: "删除",
+      danger: true,
+    }))
   ) {
     return;
   }
@@ -504,10 +525,13 @@ async function copyOrMove(mode: "copy" | "move") {
   if (!target || items.length === 0) {
     return;
   }
-  const destination = window.prompt(
-    mode === "copy" ? "复制到目录" : "移动到目录",
-    path.value,
-  );
+  const destination = await promptDialog({
+    title: mode === "copy" ? "复制到目录" : "移动到目录",
+    message: "请输入目标目录路径",
+    value: path.value,
+    placeholder: "/sdcard/Download",
+    confirmText: mode === "copy" ? "复制" : "移动",
+  });
   if (!destination) {
     return;
   }
@@ -551,10 +575,12 @@ async function archiveSelected() {
   if (!target || items.length === 0) {
     return;
   }
-  const name = window.prompt(
-    "压缩包名称",
-    `backup-${Date.now()}.tar`,
-  );
+  const name = await promptDialog({
+    title: "打包为 tar",
+    message: "请输入压缩包名称",
+    value: `backup-${Date.now()}.tar`,
+    confirmText: "打包",
+  });
   if (!name || name.includes("/")) {
     return;
   }

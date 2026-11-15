@@ -1109,7 +1109,8 @@
         networkTcpipAction,
         type DeviceAction,
     } from "../services/deviceActions";
-    import { settings } from "../services/settings";
+    import { confirmDialog, promptDialog } from "../services/dialogs";
+import { settings } from "../services/settings";
 
     // 轮询间隔：连接后更快，未连接时放慢
     const POLL_CONNECTED = 2000;
@@ -2284,9 +2285,12 @@
             return;
         }
         if (
-            !window.confirm(
-                `确定把镜像刷入 ${partition} 分区吗？操作失败可能导致设备无法开机。`,
-            )
+            !(await confirmDialog({
+                title: "刷入分区",
+                message: `确定把镜像刷入 ${partition} 分区吗？操作失败可能导致设备无法开机。`,
+                confirmText: "刷入",
+                danger: true,
+            }))
         ) {
             return;
         }
@@ -2440,14 +2444,24 @@
     }
 
     async function removeForwardPrompt() {
-        const value = window.prompt("要移除的电脑端口");
+        const value = await promptDialog({
+            title: "移除端口转发",
+            message: "请输入要移除的电脑端口",
+            placeholder: "例如 8080",
+            confirmText: "移除",
+        });
         if (value && value.trim() !== "") {
             await removePortForward(value.trim());
         }
     }
 
     async function removeReversePrompt() {
-        const value = window.prompt("要移除的设备端口");
+        const value = await promptDialog({
+            title: "移除反向转发",
+            message: "请输入要移除的设备端口",
+            placeholder: "例如 8080",
+            confirmText: "移除",
+        });
         if (value && value.trim() !== "") {
             await removePortReverse(value.trim());
         }
@@ -2649,7 +2663,14 @@
         if (!target) {
             return;
         }
-        if (!window.confirm(`确定删除用户 ${user.name}（${user.id}）吗？`)) {
+        if (
+            !(await confirmDialog({
+                title: "删除用户",
+                message: `确定删除用户 ${user.name}（${user.id}）吗？`,
+                confirmText: "删除",
+                danger: true,
+            }))
+        ) {
             return;
         }
         await deviceToolAction(
