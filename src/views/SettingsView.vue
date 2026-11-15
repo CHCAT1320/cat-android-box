@@ -251,13 +251,17 @@ async function openReleases() {
     border-color: #1f2937;
   }
   .color-random {
-    padding: 6px 12px;
-    border: 1px solid #d1d5db;
+    height: var(--control-height);
+    padding: 0 12px;
+    border: 1px solid var(--control-border);
     background: #fff;
     color: #374151;
     font-family: inherit;
-    font-size: 13px;
-    cursor: pointer;
+    font-size: var(--control-font);
+  }
+  .color-random:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .color-random.active {
     border-color: var(--accent);
@@ -271,32 +275,31 @@ async function openReleases() {
   .text-input {
     flex: 1;
     min-width: 240px;
-    padding: 8px 10px;
-    border: 1px solid #d1d5db;
+    height: var(--control-height);
+    padding: 0 10px;
+    border: 1px solid var(--control-border);
+    background: #fff;
+    color: var(--control-text);
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--control-font);
+    outline: none;
   }
   .row button,
   .card > button {
-    padding: 8px 14px;
+    height: var(--control-height);
+    padding: 0 14px;
     border: 1px solid var(--accent);
     background: #fff;
     color: var(--accent);
     font-family: inherit;
-    font-size: 13px;
-    cursor: pointer;
+    font-size: var(--control-font);
   }
   .row button:hover:not(:disabled),
   .card > button:hover:not(:disabled) {
-    background: rgba(59, 130, 246, 0.08);
+    background: var(--control-hover);
   }
   .card > button + button {
     margin-left: 8px;
-  }
-  .row button:disabled,
-  .card > button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
   }
   .secondary {
     border-color: #d1d5db !important;

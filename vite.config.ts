@@ -6,6 +6,8 @@ import process from "node:process";
 import { execFile, execFileSync } from "node:child_process";
 // @ts-expect-error type error without @types/node package
 import fs from "node:fs";
+// @ts-expect-error type error without @types/node package
+import net from "node:net";
 import Inspect from "vite-plugin-inspect";
 
 const host = process.env.TAURI_DEV_HOST;
@@ -99,6 +101,194 @@ function validateArgs(tool: string, args: string[]): string | null {
     return `不允许的 ${tool} 命令: ${verb ?? ""}`;
   }
   return null;
+}
+
+interface ScanAddress {
+  host: string;
+  port: number;
+}
+
+const SUBNET_SCAN_PORTS = [5555, 5557, 7555, 16384, 21503, 58526, 62001, 62025, 62026];
+
+// 与 Rust 端保持一致，包含模拟器与常见无线调试工具的端口
+function adbScanPorts(): number[] {
+  const ports: number[] = [];
+  for (let port = 5555; port <= 5685; port += 2) {
+    ports.push(port);
+  }
+  ports.push(7555, 16384, 16416, 21503, 58526, 62001, 62025, 62026, 62027);
+  return [...new Set(ports)].sort((a, b) => a - b);
+}
+
+function parseIpv4(value: string): number | null {
+  const parts = value.split(".");
+  if (parts.length !== 4) {
+    return null;
+  }
+  let result = 0;
+  for (const part of parts) {
+    if (!/^\d+$/.test(part)) {
+      return null;
+    }
+    const octet = Number(part);
+    if (octet > 255) {
+      return null;
+    }
+    result = (result << 8) | octet;
+  }
+  return result >>> 0;
+}
+
+function formatIpv4(value: number): string {
+  return [24, 16, 8, 0].map((shift) => (value >>> shift) & 255).join(".");
+}
+
+function formatScanAddress(address: ScanAddress): string {
+  const host = address.host.includes(":") ? `[${address.host}]` : address.host;
+  return `${host}:${address.port}`;
+}
+
+function parseScanTarget(value: string): {
+  addresses: ScanAddress[];
+  error: string;
+} {
+  const target = value.trim();
+  if (target === "") {
+    return { addresses: [], error: "请输入要扫描的主机或网段" };
+  }
+
+  if (target.includes("/")) {
+    const [ipPart, prefixPart] = target.split("/");
+    const ip = parseIpv4(ipPart);
+    const prefix = Number(prefixPart);
+    if (ip === null || !Number.isInteger(prefix) || prefix < 24 || prefix > 32) {
+      return {
+        addresses: [],
+        error: "网段扫描仅支持 /24 到 /32 的 IPv4 地址",
+      };
+    }
+
+    const mask = (0xffffffff << (32 - prefix)) >>> 0;
+    const base = (ip & mask) >>> 0;
+    const size = 2 ** (32 - prefix);
+    const start = prefix <= 30 ? base + 1 : base;
+    const end = prefix <= 30 ? base + size - 2 : base + size - 1;
+    const addresses: ScanAddress[] = [];
+    for (let current = start; current <= end; current += 1) {
+      const host = formatIpv4(current);
+      for (const port of SUBNET_SCAN_PORTS) {
+        addresses.push({ host, port });
+      }
+    }
+    return { addresses, error: "" };
+  }
+
+  const host = target.toLowerCase() === "localhost" ? "127.0.0.1" : target;
+  return {
+    addresses: adbScanPorts().map((port) => ({ host, port })),
+    error: "",
+  };
+}
+
+function probeScanAddress(address: ScanAddress, timeout: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = net.connect({ host: address.host, port: address.port });
+    let settled = false;
+    const done = (open: boolean) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.destroy();
+      resolve(open);
+    };
+    socket.setTimeout(timeout, () => done(false));
+    socket.once("connect", () => done(true));
+    socket.once("error", () => done(false));
+  });
+}
+
+async function scanTargets(addresses: ScanAddress[]): Promise<string[]> {
+  const found: string[] = [];
+  let next = 0;
+  const workers = Math.min(128, addresses.length);
+  await Promise.all(
+    Array.from({ length: workers }, async () => {
+      while (true) {
+        const index = next;
+        next += 1;
+        if (index >= addresses.length) {
+          return;
+        }
+        const address = addresses[index];
+        if (await probeScanAddress(address, 250)) {
+          found.push(formatScanAddress(address));
+        }
+      }
+    }),
+  );
+  return found.sort();
+}
+
+function adbScanApi(): Plugin {
+  return {
+    name: "adb-scan-api",
+    configureServer(server) {
+      // 扫描主机或网段上的常见 ADB 端口，开发环境与桌面端行为一致
+      server.middlewares.use("/api/adb/scan", (request, response) => {
+        const req = request as unknown as RawRequest;
+
+        if (req.method !== "POST") {
+          response.statusCode = 405;
+          response.end();
+          return;
+        }
+
+        let body = "";
+        req.on("data", (chunk: string) => {
+          body += chunk;
+        });
+
+        req.on("end", async () => {
+          response.setHeader("Content-Type", "application/json; charset=utf-8");
+
+          let target: unknown;
+          try {
+            ({ target } = JSON.parse(body));
+          } catch {
+            response.statusCode = 400;
+            response.end(JSON.stringify({ error: "请求格式错误" }));
+            return;
+          }
+
+          if (typeof target !== "string") {
+            response.statusCode = 400;
+            response.end(JSON.stringify({ error: "缺少扫描地址" }));
+            return;
+          }
+
+          const parsed = parseScanTarget(target);
+          if (parsed.error !== "") {
+            response.statusCode = 400;
+            response.end(JSON.stringify({ error: parsed.error }));
+            return;
+          }
+
+          try {
+            const endpoints = await scanTargets(parsed.addresses);
+            response.end(JSON.stringify({ endpoints }));
+          } catch (error) {
+            response.statusCode = 500;
+            response.end(
+              JSON.stringify({
+                error: error instanceof Error ? error.message : "扫描失败",
+              }),
+            );
+          }
+        });
+      });
+    },
+  };
 }
 
 function adbExecApi(): Plugin {
@@ -273,7 +463,7 @@ function adbScreenshotApi(): Plugin {
 
 // https://vite.dev/config/
 export default defineConfig(() => ({
-  plugins: [vue(), adbExecApi(), adbScreenshotApi(), Inspect()],
+  plugins: [vue(), adbExecApi(), adbScreenshotApi(), adbScanApi(), Inspect()],
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //

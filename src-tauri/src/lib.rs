@@ -44,6 +44,7 @@ pub fn run() {
         .manage(adb::LogcatState::default())
         .invoke_handler(tauri::generate_handler![
             adb::run_device_tool,
+            adb::scan_adb_ports,
             adb::take_screenshot,
             adb::capture_screen,
             adb::get_app_metadata,

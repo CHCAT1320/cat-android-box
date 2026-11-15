@@ -914,12 +914,21 @@ async function exportApk(app: AppEntry) {
   .device-link {
     color: var(--accent);
   }
-  .device-select {
-    padding: 8px 10px;
-    border: 1px solid #d1d5db;
+  .device-select,
+  .search,
+  .filter {
+    box-sizing: border-box;
+    height: var(--control-height);
+    padding: 0 10px;
+    border: 1px solid var(--control-border);
     background: #fff;
+    color: var(--control-text);
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--control-font);
+  }
+  .search,
+  .filter {
+    outline: none;
   }
   .toolbar {
     display: flex;
@@ -933,33 +942,18 @@ async function exportApk(app: AppEntry) {
   .search {
     flex: 1;
     min-width: 200px;
-    padding: 8px 10px;
-    border: 1px solid #d1d5db;
-    font-family: inherit;
-    font-size: 13px;
-  }
-  .filter {
-    padding: 8px 10px;
-    border: 1px solid #d1d5db;
-    background: #fff;
-    font-family: inherit;
-    font-size: 13px;
   }
   .toolbar button {
-    padding: 8px 14px;
+    height: var(--control-height);
+    padding: 0 14px;
     border: 1px solid var(--accent);
     background: #fff;
     color: var(--accent);
     font-family: inherit;
-    font-size: 13px;
-    cursor: pointer;
+    font-size: var(--control-font);
   }
   .toolbar button:hover:not(:disabled) {
-    background: rgba(59, 130, 246, 0.08);
-  }
-  .toolbar button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+    background: var(--control-hover);
   }
   .message {
     margin: 12px 0 0;
@@ -996,17 +990,13 @@ async function exportApk(app: AppEntry) {
     background: #fff;
   }
   .batch-bar button {
-    padding: 6px 10px;
+    height: var(--control-height-sm);
+    padding: 0 10px;
     border: 1px solid var(--accent);
     background: #fff;
     color: var(--accent);
     font-family: inherit;
-    font-size: 12px;
-    cursor: pointer;
-  }
-  .batch-bar button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+    font-size: var(--control-font-sm);
   }
   .selection-count {
     color: #6b7280;
@@ -1093,21 +1083,18 @@ async function exportApk(app: AppEntry) {
     gap: 6px;
   }
   .app-actions button {
-    padding: 5px 10px;
-    border: 1px solid #d1d5db;
+    height: var(--control-height-sm);
+    padding: 0 9px;
+    border: 1px solid var(--control-border);
     background: #fff;
     color: #374151;
     font-family: inherit;
-    font-size: 12px;
-    cursor: pointer;
+    font-size: var(--control-font-sm);
   }
   .app-actions button:hover:not(:disabled) {
     border-color: var(--accent);
     color: var(--accent);
-  }
-  .app-actions button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+    background: var(--control-hover);
   }
   .app-actions .danger {
     color: #dc2626;
@@ -1153,25 +1140,17 @@ async function exportApk(app: AppEntry) {
     margin-top: 16px;
   }
   .dialog-actions button {
+    height: 36px;
     min-width: 96px;
-    padding: 8px 16px;
+    padding: 0 16px;
     border: 1px solid var(--accent);
     background: #fff;
     color: var(--accent);
     font-family: inherit;
     font-size: 14px;
-    cursor: pointer;
   }
   .dialog-actions button:hover:not(:disabled) {
-    background: rgba(59, 130, 246, 0.08);
-  }
-  .dialog-actions button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-  .dialog-confirm {
-    background: var(--accent);
-    color: #fff;
+    background: var(--control-hover);
   }
   .dialog-error {
     margin: 10px 0 0;
@@ -1187,17 +1166,22 @@ async function exportApk(app: AppEntry) {
     margin: 12px 0;
   }
   .detail-tabs button {
-    padding: 5px 14px;
-    border: 1px solid #d1d5db;
+    height: 30px;
+    padding: 0 14px;
+    border: 1px solid var(--control-border);
     background: #fff;
     color: #374151;
     font-family: inherit;
-    font-size: 13px;
-    cursor: pointer;
+    font-size: var(--control-font);
+  }
+  .detail-tabs button:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .detail-tabs button.active {
     border-color: var(--accent);
-    color: var(--accent);
+    background: var(--accent);
+    color: #fff;
   }
   .detail-info p,
   .detail-permissions p {
@@ -1257,17 +1241,16 @@ async function exportApk(app: AppEntry) {
     gap: 4px;
   }
   .perm-toggle {
-    padding: 2px 8px;
+    height: var(--control-height-xs);
+    padding: 0 8px;
     border: 1px solid var(--accent);
     background: #fff;
     color: var(--accent);
     font-family: inherit;
     font-size: 11px;
-    cursor: pointer;
   }
-  .perm-toggle:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+  .perm-toggle:hover:not(:disabled) {
+    background: var(--control-hover);
   }
   .perm-state.granted {
     color: #166534;

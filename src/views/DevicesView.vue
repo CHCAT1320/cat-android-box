@@ -195,6 +195,52 @@
                         </button>
                     </div>
 
+                    <div
+                        v-if="activeAction.id === 'network-connect'"
+                        class="scan-panel"
+                    >
+                        <div class="scan-header">
+                            <span>扫描地址</span>
+                            <div class="scan-controls">
+                                <input
+                                    v-model="settings.scanTarget"
+                                    class="scan-input"
+                                    placeholder="127.0.0.1 或 192.168.1.0/24"
+                                    :disabled="actionRunning || scanRunning"
+                                    @keyup.enter="scanPorts"
+                                />
+                                <button
+                                    class="action-pick"
+                                    :disabled="actionRunning || scanRunning"
+                                    @click="scanPorts"
+                                >
+                                    {{ scanRunning ? "扫描中..." : "自动扫描" }}
+                                </button>
+                            </div>
+                        </div>
+                        <p class="scan-hint">
+                            支持单个 IP、主机名或 IPv4 网段，例如 192.168.1.0/24
+                        </p>
+                        <p v-if="scanError" class="dialog-error">
+                            {{ scanError }}
+                        </p>
+                        <p v-if="scanNotice" class="scan-notice">
+                            {{ scanNotice }}
+                        </p>
+                        <div v-if="scanResults.length > 0" class="scan-results">
+                            <button
+                                v-for="address in scanResults"
+                                :key="address"
+                                class="scan-result"
+                                type="button"
+                                :disabled="actionRunning"
+                                @click="selectScanResult(address)"
+                            >
+                                {{ address }}
+                            </button>
+                        </div>
+                    </div>
+
                     <div v-if="actionOutput" class="output-panel">
                         <pre>{{ actionOutput }}</pre>
                         <button class="copy-button" @click="copyOutput">
@@ -1025,6 +1071,7 @@
         swipeScreen,
         runDeviceTool,
         runningInTauri,
+        scanAdbPorts,
         takeScreenshot,
         tapScreen,
         addForward,
@@ -1371,6 +1418,10 @@
     const actionRunning = ref(false);
     const actionOutput = ref("");
     const actionConfirmed = ref(false);
+    const scanRunning = ref(false);
+    const scanResults = ref<string[]>([]);
+    const scanError = ref("");
+    const scanNotice = ref("");
 
     const inputPlaceholder = computed(() => {
         const action = activeAction.value;
@@ -1414,7 +1465,55 @@
         actionPathsText.value = "";
         actionOutput.value = "";
         actionConfirmed.value = false;
+        scanResults.value = [];
+        scanError.value = "";
+        scanNotice.value = "";
         activeAction.value = action;
+        if (
+            action.id === "network-connect" &&
+            !settings.scanTarget.includes("/")
+        ) {
+            void scanPorts();
+        }
+    }
+
+    async function scanPorts() {
+        if (scanRunning.value || actionRunning.value) {
+            return;
+        }
+        const target = settings.scanTarget.trim() || "127.0.0.1";
+        if (settings.scanTarget.trim() === "") {
+            settings.scanTarget = target;
+        }
+        scanRunning.value = true;
+        scanError.value = "";
+        scanNotice.value = "";
+        scanResults.value = [];
+        try {
+            const endpoints = await scanAdbPorts(target);
+            scanResults.value = endpoints;
+            if (endpoints.length === 0) {
+                scanNotice.value = `未在 ${target} 发现可用的 ADB 地址`;
+                return;
+            }
+            scanNotice.value = `发现 ${endpoints.length} 个可用 ADB 地址，点击可填入`;
+            if (
+                actionPath.value.trim() === "" &&
+                endpoints.length === 1 &&
+                activeAction.value?.id === "network-connect"
+            ) {
+                actionPath.value = endpoints[0];
+            }
+        } catch (error) {
+            scanError.value =
+                error instanceof Error ? error.message : "扫描端口失败";
+        } finally {
+            scanRunning.value = false;
+        }
+    }
+
+    function selectScanResult(address: string) {
+        actionPath.value = address;
     }
 
     function closeAction() {
@@ -2716,17 +2815,17 @@
         font-size: 13px;
     }
     .reload-button {
+        height: var(--control-height);
         margin-top: 14px;
-        padding: 8px 16px;
+        padding: 0 16px;
         border: 1px solid var(--accent);
         background: #fff;
         color: var(--accent);
         font-family: inherit;
-        font-size: 13px;
-        cursor: pointer;
+        font-size: var(--control-font);
     }
     .reload-button:hover {
-        background: rgba(59, 130, 246, 0.08);
+        background: var(--control-hover);
     }
     .device-mode {
         color: var(--accent);
@@ -2770,13 +2869,17 @@
         margin: 0;
     }
     .rebotActions button {
-        padding: 8px 10px;
-        border: none;
-        color: var(--accent);
-        line-height: 1.2;
-        cursor: pointer;
+        min-height: 30px;
+        padding: 0 8px;
+        border: 1px solid transparent;
         background: #fff;
-        transition: background-color 0.15s ease;
+        color: var(--accent);
+        font-family: inherit;
+        font-size: var(--control-font);
+        line-height: 1.2;
+    }
+    .rebotActions button:hover {
+        background: var(--control-hover);
     }
     .rebotActions button:active {
         background: #e5e7eb;
@@ -2804,14 +2907,18 @@
         margin-top: 12px;
     }
     .pair-form input {
-        padding: 8px 10px;
-        border: 1px solid #d1d5db;
+        box-sizing: border-box;
+        height: var(--control-height);
+        padding: 0 10px;
+        border: 1px solid var(--control-border);
+        background: #fff;
+        color: var(--control-text);
         font-family: inherit;
-        font-size: 13px;
+        font-size: var(--control-font);
+        outline: none;
     }
     .pair-form input:focus {
         border-color: var(--accent);
-        outline: none;
     }
     .partition-hint {
         display: flex;
@@ -2825,17 +2932,15 @@
     }
     .link-button {
         flex: none;
-        padding: 2px 4px;
+        padding: 0 2px;
         border: none;
         background: none;
         color: var(--accent);
         font-family: inherit;
-        font-size: 12px;
-        cursor: pointer;
+        font-size: var(--control-font-sm);
     }
-    .link-button:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
+    .link-button:hover:not(:disabled) {
+        text-decoration: underline;
     }
     .pair-success {
         margin-top: 8px;
@@ -2867,20 +2972,21 @@
     }
     .command-history button {
         max-width: 100%;
-        padding: 3px 8px;
+        height: var(--control-height-xs);
+        padding: 0 8px;
         overflow: hidden;
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--control-border);
         background: #f9fafb;
         color: #374151;
         font-family: Consolas, monospace;
         font-size: 11px;
         text-overflow: ellipsis;
         white-space: nowrap;
-        cursor: pointer;
     }
     .command-history button:hover:not(:disabled) {
         border-color: var(--accent);
         color: var(--accent);
+        background: var(--control-hover);
     }
     .command-output {
         max-height: 240px;
@@ -2907,10 +3013,13 @@
         min-height: 110px;
         margin-bottom: 8px;
         padding: 8px 10px;
-        border: 1px solid #d1d5db;
+        border: 1px solid var(--control-border);
+        background: #fff;
+        color: var(--control-text);
         font-family: Consolas, monospace;
         font-size: 12px;
         line-height: 1.5;
+        outline: none;
         resize: vertical;
     }
     .script-list {
@@ -2927,27 +3036,36 @@
     }
     .script-load {
         flex: 1;
-        padding: 4px 8px;
+        height: var(--control-height-sm);
+        padding: 0 8px;
         overflow: hidden;
-        border: 1px solid #e5e7eb;
+        border: 1px solid var(--control-border);
         background: #f9fafb;
         color: #374151;
         font-family: inherit;
-        font-size: 12px;
+        font-size: var(--control-font-sm);
         text-align: left;
         text-overflow: ellipsis;
         white-space: nowrap;
-        cursor: pointer;
+    }
+    .script-load:hover:not(:disabled) {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--control-hover);
     }
     .script-delete {
         flex: none;
-        padding: 4px 8px;
+        height: var(--control-height-sm);
+        padding: 0 8px;
         border: 1px solid #fecaca;
         background: #fff;
         color: #dc2626;
         font-family: inherit;
-        font-size: 11px;
-        cursor: pointer;
+        font-size: var(--control-font-sm);
+    }
+    .script-delete:hover:not(:disabled) {
+        border-color: #dc2626;
+        background: #fef2f2;
     }
     .tool-list {
         max-height: 180px;
@@ -3006,19 +3124,21 @@
     }
     .preview-controls .dialog-cancel {
         min-width: 0;
-        padding: 6px 10px;
-        font-size: 12px;
+        height: 30px;
+        padding: 0 10px;
+        font-size: var(--control-font-sm);
     }
     .preview-controls button {
+        height: 30px;
+        padding: 0 10px;
         border: 1px solid var(--accent);
         background: #fff;
         color: var(--accent);
         font-family: inherit;
-        font-size: 12px;
-        cursor: pointer;
+        font-size: var(--control-font-sm);
     }
     .preview-controls button:hover {
-        background: rgba(59, 130, 246, 0.08);
+        background: var(--control-hover);
     }
     .preview-hint {
         margin: 8px 0 0;
@@ -3030,10 +3150,14 @@
     .preview-text {
         flex: 1;
         min-width: 140px;
-        padding: 6px 8px;
-        border: 1px solid #d1d5db;
+        height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--control-border);
+        background: #fff;
+        color: var(--control-text);
         font-family: inherit;
-        font-size: 12px;
+        font-size: var(--control-font-sm);
+        outline: none;
     }
     .modeActions {
         display: grid;
@@ -3043,19 +3167,18 @@
         margin: 12px auto 0;
     }
     .mode-action {
-        padding: 10px;
-        border: 1px solid #e5e7eb;
-        border-radius: 8px;
+        min-height: 38px;
+        padding: 8px 10px;
+        border: 1px solid var(--control-border);
         background: #fff;
         color: #1f2937;
+        font-family: inherit;
         font-size: 14px;
-        cursor: pointer;
-        transition: border-color 0.15s ease, color 0.15s ease,
-            background-color 0.15s ease;
     }
     .mode-action:hover {
         border-color: var(--accent);
         color: var(--accent);
+        background: var(--control-hover);
     }
     .mode-action:active {
         background: #e5e7eb;
@@ -3168,8 +3291,7 @@
     }
     .network-action:disabled {
         color: var(--accent);
-        opacity: 0.3;
-        cursor: not-allowed;
+        opacity: 0.4;
     }
     .sidebar-terminal {
         display: flex;
@@ -3194,16 +3316,14 @@
         height: 16px;
         padding: 0;
         border: 1px solid currentColor;
-        border-radius: 50%;
         background: none;
         color: var(--accent);
         font-family: inherit;
         font-size: 11px;
         line-height: 1;
-        cursor: pointer;
     }
     .terminal-help:hover {
-        background: rgba(59, 130, 246, 0.08);
+        background: var(--control-hover);
     }
     .help-text {
         line-height: 1.6;
@@ -3215,24 +3335,19 @@
     }
     .terminal-button {
         flex: 1;
-        padding: 8px 6px;
-        border: 1px solid #e5e7eb;
+        height: var(--control-height);
+        padding: 0 8px;
+        border: 1px solid var(--accent);
         background: #fff;
         color: var(--accent);
         font-family: inherit;
-        font-size: 13px;
-        cursor: pointer;
-        transition: border-color 0.15s ease, background-color 0.15s ease;
+        font-size: var(--control-font);
     }
     .terminal-button:hover:not(:disabled) {
-        border-color: var(--accent);
+        background: var(--control-hover);
     }
     .terminal-button:active:not(:disabled) {
         background: #e5e7eb;
-    }
-    .terminal-button:disabled {
-        opacity: 0.4;
-        cursor: not-allowed;
     }
     .terminal-error {
         margin: 0;
@@ -3279,6 +3394,83 @@
         margin-bottom: 12px !important;
         font-size: 13px;
     }
+    .scan-panel {
+        margin-top: 10px;
+        padding: 10px;
+        border: 1px solid #e2e8f0;
+        background: #f8fafc;
+    }
+
+    .scan-header {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        color: #4b5563;
+        font-size: 12px;
+        text-align: left;
+    }
+
+    .scan-controls {
+        display: flex;
+        flex: 1;
+        gap: 6px;
+        align-items: center;
+        justify-content: flex-end;
+    }
+
+    .scan-input {
+        width: 210px;
+        min-width: 0;
+        height: var(--control-height);
+        padding: 0 10px;
+        border: 1px solid var(--control-border);
+        background: #fff;
+        color: var(--control-text);
+        font-family: inherit;
+        font-size: var(--control-font);
+        outline: none;
+    }
+
+    .scan-input:focus {
+        border-color: var(--accent);
+    }
+
+    .scan-hint {
+        margin-top: 6px !important;
+        color: #64748b;
+        font-size: 11px;
+        text-align: left;
+    }
+
+    .scan-notice {
+        margin-top: 8px !important;
+        color: #4b5563;
+        font-size: 12px;
+        text-align: left;
+    }
+
+    .scan-results {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+    }
+
+    .scan-result {
+        height: 30px;
+        padding: 0 10px;
+        border: 1px solid var(--accent);
+        background: #fff;
+        color: var(--accent);
+        font-family: Consolas, monospace;
+        font-size: var(--control-font-sm);
+    }
+
+    .scan-result:hover:not(:disabled) {
+        background: var(--control-hover);
+    }
+
     .action-input {
         display: flex;
         gap: 8px;
@@ -3288,31 +3480,38 @@
     .action-input textarea {
         flex: 1;
         min-width: 0;
-        padding: 8px 10px;
-        border: 1px solid #d1d5db;
-        border-radius: 8px;
-        font-size: 13px;
+        border: 1px solid var(--control-border);
+        background: #fff;
+        color: var(--control-text);
+        font-size: var(--control-font);
         font-family: inherit;
+        outline: none;
         resize: vertical;
+    }
+    .action-input input {
+        height: var(--control-height);
+        padding: 0 10px;
+    }
+    .action-input textarea {
+        padding: 8px 10px;
+        line-height: 1.5;
     }
     .action-input input:focus,
     .action-input textarea:focus {
         border-color: var(--accent);
-        outline: none;
     }
     .action-pick {
         flex: none;
-        padding: 8px 12px;
+        height: var(--control-height);
+        padding: 0 12px;
         border: 1px solid var(--accent);
-        border-radius: 0;
         background: #fff;
         color: var(--accent);
         font-family: inherit;
-        font-size: 13px;
-        cursor: pointer;
+        font-size: var(--control-font);
     }
-    .action-pick:hover {
-        background: rgba(59, 130, 246, 0.08);
+    .action-pick:hover:not(:disabled) {
+        background: var(--control-hover);
     }
     .output-panel {
         margin-top: 12px;
@@ -3331,56 +3530,38 @@
         word-break: break-all;
     }
     .copy-button {
+        height: 30px;
         margin-top: 8px;
-        padding: 6px 12px;
+        padding: 0 12px;
         border: 1px solid var(--accent);
-        border-radius: 0;
         background: #fff;
         color: var(--accent);
         font-family: inherit;
-        font-size: 13px;
-        cursor: pointer;
+        font-size: var(--control-font-sm);
     }
     .copy-button:hover {
-        background: rgba(59, 130, 246, 0.08);
+        background: var(--control-hover);
     }
     .dialog-actions {
         display: flex;
+        flex-wrap: wrap;
         justify-content: center;
-        gap: 12px;
-        margin-top: 20px;
+        gap: 10px;
+        margin-top: 16px;
     }
     .dialog-actions button {
+        height: 36px;
         min-width: 96px;
-        padding: 8px 16px;
+        padding: 0 16px;
         border: 1px solid var(--accent);
-        border-radius: 0;
         background: #fff;
         color: var(--accent);
         font-family: inherit;
         font-size: 14px;
-        cursor: pointer;
-        transition: background-color 0.15s ease, color 0.15s ease,
-            opacity 0.15s ease;
     }
-    .dialog-cancel {
-        color: var(--accent);
-        background: #fff;
-    }
-    .dialog-cancel:hover {
-        background: rgba(59, 130, 246, 0.08);
-    }
-    .dialog-confirm {
-        border-color: var(--accent);
-        color: #fff;
-        background: var(--accent);
-    }
+    .dialog-cancel:hover,
     .dialog-confirm:hover {
-        filter: brightness(0.95);
-    }
-    .dialog-actions button:disabled {
-        cursor: not-allowed;
-        opacity: 0.6;
+        background: var(--control-hover);
     }
     @media (max-width: 900px) {
         .devices-layout {

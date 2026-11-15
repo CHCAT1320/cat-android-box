@@ -11,6 +11,7 @@ export const ACCENT_COLORS = [
 export interface AppSettings {
   accent: string;
   downloadDirectory: string;
+  scanTarget: string;
 }
 
 const STORAGE_KEY = "cat-android-box-settings";
@@ -18,6 +19,7 @@ const STORAGE_KEY = "cat-android-box-settings";
 const defaults: AppSettings = {
   accent: "random",
   downloadDirectory: "",
+  scanTarget: "127.0.0.1",
 };
 
 function load(): AppSettings {
@@ -30,6 +32,7 @@ function load(): AppSettings {
     return {
       accent: saved.accent ?? defaults.accent,
       downloadDirectory: saved.downloadDirectory ?? defaults.downloadDirectory,
+      scanTarget: saved.scanTarget ?? defaults.scanTarget,
     };
   } catch {
     return { ...defaults };

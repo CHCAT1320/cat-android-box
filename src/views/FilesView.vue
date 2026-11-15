@@ -816,11 +816,14 @@ async function extractFile(entry: FileEntry) {
     color: var(--accent);
   }
   .device-select {
-    padding: 8px 10px;
-    border: 1px solid #d1d5db;
+    box-sizing: border-box;
+    height: var(--control-height);
+    padding: 0 10px;
+    border: 1px solid var(--control-border);
     background: #fff;
+    color: var(--control-text);
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--control-font);
   }
   .toolbar {
     display: flex;
@@ -832,28 +835,28 @@ async function extractFile(entry: FileEntry) {
     background: #fff;
   }
   .toolbar button {
-    padding: 8px 12px;
+    height: var(--control-height);
+    padding: 0 12px;
     border: 1px solid var(--accent);
     background: #fff;
     color: var(--accent);
     font-family: inherit;
-    font-size: 13px;
-    cursor: pointer;
+    font-size: var(--control-font);
   }
   .toolbar button:hover:not(:disabled) {
-    background: rgba(59, 130, 246, 0.08);
-  }
-  .toolbar button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+    background: var(--control-hover);
   }
   .path-input {
     flex: 1;
     min-width: 220px;
-    padding: 8px 10px;
-    border: 1px solid #d1d5db;
+    height: var(--control-height);
+    padding: 0 10px;
+    border: 1px solid var(--control-border);
+    background: #fff;
+    color: var(--control-text);
     font-family: Consolas, monospace;
-    font-size: 13px;
+    font-size: var(--control-font);
+    outline: none;
   }
   .breadcrumb {
     display: flex;
@@ -865,13 +868,12 @@ async function extractFile(entry: FileEntry) {
     font-size: 12px;
   }
   .crumb {
-    padding: 2px 4px;
+    padding: 0 2px;
     border: none;
     background: none;
-    color: #4b5563;
+    color: var(--control-muted);
     font-family: inherit;
-    font-size: 12px;
-    cursor: pointer;
+    font-size: var(--control-font-sm);
   }
   .crumb:hover {
     color: var(--accent);
@@ -950,21 +952,18 @@ async function extractFile(entry: FileEntry) {
     gap: 6px;
   }
   .file-actions button {
-    padding: 4px 9px;
-    border: 1px solid #d1d5db;
+    height: var(--control-height-sm);
+    padding: 0 9px;
+    border: 1px solid var(--control-border);
     background: #fff;
     color: #374151;
     font-family: inherit;
-    font-size: 12px;
-    cursor: pointer;
+    font-size: var(--control-font-sm);
   }
   .file-actions button:hover:not(:disabled) {
     border-color: var(--accent);
     color: var(--accent);
-  }
-  .file-actions button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
+    background: var(--control-hover);
   }
   .file-actions .danger {
     color: #dc2626;
@@ -998,29 +997,34 @@ async function extractFile(entry: FileEntry) {
   }
   .bookmark {
     max-width: 220px;
-    padding: 3px 8px;
+    height: var(--control-height-xs);
+    padding: 0 8px;
     overflow: hidden;
-    border: 1px solid #e5e7eb;
+    border: 1px solid var(--control-border);
     background: #f9fafb;
     color: #374151;
     font-family: Consolas, monospace;
     font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
-    cursor: pointer;
   }
   .bookmark:hover {
     border-color: var(--accent);
     color: var(--accent);
+    background: var(--control-hover);
   }
   .bookmark-clear {
-    padding: 3px 8px;
-    border: 1px solid #e5e7eb;
+    height: var(--control-height-xs);
+    padding: 0 8px;
+    border: 1px solid var(--control-border);
     background: #fff;
-    color: #6b7280;
+    color: var(--control-muted);
     font-family: inherit;
     font-size: 11px;
-    cursor: pointer;
+  }
+  .bookmark-clear:hover {
+    border-color: var(--accent);
+    color: var(--accent);
   }
   .file-check {
     flex: none;
@@ -1056,18 +1060,23 @@ async function extractFile(entry: FileEntry) {
   }
   .dialog-actions {
     display: flex;
+    flex-wrap: wrap;
     justify-content: center;
-    margin-top: 14px;
+    gap: 10px;
+    margin-top: 16px;
   }
   .dialog-actions button {
+    height: 36px;
     min-width: 96px;
-    padding: 8px 16px;
+    padding: 0 16px;
     border: 1px solid var(--accent);
-    background: var(--accent);
-    color: #fff;
+    background: #fff;
+    color: var(--accent);
     font-family: inherit;
     font-size: 14px;
-    cursor: pointer;
+  }
+  .dialog-actions button:hover:not(:disabled) {
+    background: var(--control-hover);
   }
   .dialog-error {
     margin: 10px 0 0;

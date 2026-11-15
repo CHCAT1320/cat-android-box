@@ -1297,6 +1297,24 @@ export async function connectDevice(address: string): Promise<string> {
   return commandResult(result, "连接完成");
 }
 
+// 扫描主机或网段上的常见 ADB 端口，返回 IP:端口 列表
+export async function scanAdbPorts(target: string): Promise<string[]> {
+  if (inTauri) {
+    return invoke<string[]>("scan_adb_ports", { target });
+  }
+
+  const response = await fetch("/api/adb/scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ target }),
+  });
+  if (!response.ok) {
+    throw new Error(await readError(response, `扫描失败: ${response.status}`));
+  }
+  const data = (await response.json()) as { endpoints: string[] };
+  return data.endpoints;
+}
+
 export async function getProxy(serial: string): Promise<string> {
   const result = await runChecked(serial, [
     "shell",

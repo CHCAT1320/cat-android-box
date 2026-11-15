@@ -435,24 +435,20 @@ window.addEventListener("pagehide", handlePageHide);
     background: #fff;
   }
   .toolbar button {
-    padding: 8px 12px;
+    height: var(--control-height);
+    padding: 0 12px;
     border: 1px solid var(--accent);
     background: #fff;
     color: var(--accent);
     font-family: inherit;
-    font-size: 13px;
-    cursor: pointer;
+    font-size: var(--control-font);
   }
   .toolbar button:hover:not(:disabled) {
-    background: rgba(59, 130, 246, 0.08);
+    background: var(--control-hover);
   }
   .toolbar button.active {
     background: var(--accent);
     color: #fff;
-  }
-  .toolbar button:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
   }
   .switch {
     display: inline-flex;
@@ -464,18 +460,22 @@ window.addEventListener("pagehide", handlePageHide);
   .select,
   .search,
   .small-input {
-    padding: 8px 10px;
-    border: 1px solid #d1d5db;
+    box-sizing: border-box;
+    height: var(--control-height);
+    padding: 0 10px;
+    border: 1px solid var(--control-border);
     background: #fff;
+    color: var(--control-text);
     font-family: inherit;
-    font-size: 13px;
+    font-size: var(--control-font);
+    outline: none;
   }
   .search {
     flex: 1;
     min-width: 160px;
   }
   .small-input {
-    width: 90px;
+    width: 110px;
   }
   .message {
     margin: 10px 0 0;

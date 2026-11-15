@@ -109,6 +109,62 @@ onBeforeUnmount(() => {
 body {
   margin: 0;
   --page-gutter: clamp(16px, 2vw, 32px);
+  --control-height: 34px;
+  --control-height-sm: 28px;
+  --control-height-xs: 24px;
+  --control-border: #d1d5db;
+  --control-text: #1f2937;
+  --control-muted: #4b5563;
+  --control-hover: rgba(59, 130, 246, 0.08);
+  --control-radius: 0;
+  --control-font: 13px;
+  --control-font-sm: 12px;
+}
+
+/* 统一输入框与按钮的基础样式，细节尺寸由各页面复用变量 */
+button,
+input,
+select,
+textarea {
+  border-radius: var(--control-radius);
+  font-family: inherit;
+}
+
+button {
+  box-sizing: border-box;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease,
+    color 0.15s ease, opacity 0.15s ease;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select,
+textarea {
+  box-sizing: border-box;
+  border: 1px solid var(--control-border);
+  background: #fff;
+  color: var(--control-text);
+  font-size: var(--control-font);
+  outline: none;
+}
+
+input:not([type="checkbox"]):not([type="radio"]):focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
 }
 
 html {

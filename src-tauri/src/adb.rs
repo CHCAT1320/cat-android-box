@@ -464,6 +464,116 @@ fn record_screen_blocking(
     Ok(local.display().to_string())
 }
 
+// 模拟器和常见无线调试工具使用的 ADB 端口
+fn adb_scan_ports() -> Vec<u16> {
+    let mut ports: Vec<u16> = (5555..=5685).step_by(2).collect();
+    ports.extend([7555, 16384, 16416, 21503, 58526, 62001, 62025, 62026, 62027]);
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
+// 扫描网段时只探测最常用的 ADB 端口，避免连接数过多
+const SUBNET_SCAN_PORTS: &[u16] = &[
+    5555, 5557, 7555, 16384, 21503, 58526, 62001, 62025, 62026,
+];
+
+// 解析单个主机或 IPv4 网段（支持 /24 到 /32）
+fn parse_scan_target(target: &str) -> Result<(Vec<std::net::IpAddr>, Vec<u16>), String> {
+    use std::net::{IpAddr, Ipv4Addr, ToSocketAddrs};
+
+    let target = target.trim();
+    if target.is_empty() {
+        return Err("请输入要扫描的主机或网段".to_string());
+    }
+
+    if let Some((network, prefix)) = target.split_once('/') {
+        let ip: Ipv4Addr = network
+            .parse()
+            .map_err(|_| "网段格式不正确，例如 192.168.1.0/24".to_string())?;
+        let prefix: u8 = prefix
+            .parse()
+            .map_err(|_| "网段前缀不正确，例如 192.168.1.0/24".to_string())?;
+        if !(24..=32).contains(&prefix) {
+            return Err("网段扫描仅支持 /24 到 /32 的 IPv4 地址".to_string());
+        }
+
+        let mask = u32::MAX << (32 - prefix);
+        let base = u32::from(ip) & mask;
+        let size = 1u32 << (32 - prefix);
+        let (start, end) = if prefix <= 30 {
+            (base + 1, base + size - 2)
+        } else {
+            (base, base + size - 1)
+        };
+        let hosts = (start..=end)
+            .map(|value| IpAddr::V4(Ipv4Addr::from(value)))
+            .collect();
+        return Ok((hosts, SUBNET_SCAN_PORTS.to_vec()));
+    }
+
+    let hostname = if target.eq_ignore_ascii_case("localhost") {
+        "127.0.0.1"
+    } else {
+        target
+    };
+    let addresses: Vec<_> = (hostname, 0)
+        .to_socket_addrs()
+        .map_err(|error| format!("无法解析主机 {hostname}: {error}"))?
+        .collect();
+    let address = addresses
+        .iter()
+        .find(|address| address.is_ipv4())
+        .or_else(|| addresses.first())
+        .ok_or_else(|| format!("无法解析主机 {hostname}"))?;
+    Ok((vec![address.ip()], adb_scan_ports()))
+}
+
+// 扫描主机或网段上的 ADB 端口，供网络连接时自动补全地址
+#[tauri::command]
+pub async fn scan_adb_ports(target: String) -> Result<Vec<String>, String> {
+    run_blocking(move || scan_adb_ports_blocking(&target)).await
+}
+
+fn scan_adb_ports_blocking(target: &str) -> Result<Vec<String>, String> {
+    use std::net::{SocketAddr, TcpStream};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let (hosts, ports) = parse_scan_target(target)?;
+    let queue: Vec<SocketAddr> = hosts
+        .iter()
+        .flat_map(|ip| ports.iter().map(move |port| SocketAddr::new(*ip, *port)))
+        .collect();
+    if queue.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let next = AtomicUsize::new(0);
+    let found = Mutex::new(Vec::new());
+    let workers = queue.len().min(128);
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            scope.spawn(|| loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                let Some(address) = queue.get(index) else {
+                    break;
+                };
+                if TcpStream::connect_timeout(address, Duration::from_millis(250)).is_ok() {
+                    found.lock().unwrap().push(*address);
+                }
+            });
+        }
+    });
+
+    let mut addresses = found.into_inner().unwrap_or_default();
+    addresses.sort_unstable();
+    addresses.dedup();
+    Ok(addresses
+        .into_iter()
+        .map(|address| address.to_string())
+        .collect())
+}
+
 // 启动内置 scrcpy 投屏
 #[tauri::command]
 pub fn launch_scrcpy(
