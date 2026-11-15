@@ -124,7 +124,28 @@ onBeforeUnmount(() => {
   font-display: swap;
 }
 
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url("./assets/fonts/NotoSansSC-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2E80-2EFF, U+3000-303F, U+31C0-31EF, U+3200-33FF,
+    U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+
+@font-face {
+  font-family: "Noto Sans SC";
+  src: url("./assets/fonts/NotoSansSC-Bold.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+2E80-2EFF, U+3000-303F, U+31C0-31EF, U+3200-33FF,
+    U+3400-4DBF, U+4E00-9FFF, U+F900-FAFF, U+FE30-FE4F, U+FF00-FFEF;
+}
+
 body {
+  font-family: "Segoe UI", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
   margin: 0;
   --page-gutter: clamp(16px, 2vw, 32px);
   --control-height: 34px;
@@ -138,7 +159,7 @@ body {
   --control-font: 13px;
   --control-font-sm: 12px;
   --font-mono: "JetBrains Mono", "Sarasa Mono SC", Consolas,
-    "Microsoft YaHei UI", monospace;
+    "Noto Sans SC", "Microsoft YaHei UI", monospace;
 }
 
 /* 统一输入框与按钮的基础样式，细节尺寸由各页面复用变量 */

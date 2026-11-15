@@ -801,12 +801,49 @@ export async function getToolVersions(): Promise<{
 }
 
 // 重启 adb 服务，用于连接异常后的恢复
+function translateAdbServiceLine(line: string): string {
+  if (/daemon not running|starting now/i.test(line)) {
+    return "ADB 服务未运行，正在启动";
+  }
+  if (/daemon started successfully/i.test(line)) {
+    return "ADB 服务启动成功";
+  }
+  if (/failed to start daemon/i.test(line)) {
+    return "ADB 服务启动失败";
+  }
+  if (/cannot bind|smartsocket|5037/i.test(line)) {
+    return "5037 端口被占用，ADB 服务无法启动";
+  }
+  if (/didn't ACK/i.test(line)) {
+    return "ADB 服务未响应，请重试";
+  }
+  if (/doesn't match this client|server version/i.test(line)) {
+    return "ADB 客户端与服务端版本不一致";
+  }
+  return line;
+}
+
 export async function restartAdb(): Promise<string> {
   await runDeviceTool("adb", ["kill-server"]);
   const result = await runDeviceTool("adb", ["start-server"]);
-  return (
-    (result.stdout || result.stderr).trim() || "ADB 服务已重启"
-  );
+  const raw = (result.stdout || result.stderr).trim();
+  if (/daemon started successfully/i.test(raw)) {
+    return "ADB 服务已重启成功";
+  }
+  if (/failed to start daemon|cannot bind|smartsocket|didn't ACK/i.test(raw)) {
+    return "ADB 服务启动失败：5037 端口可能被占用，请关闭占用程序后重试";
+  }
+  if (raw === "") {
+    return result.code === null || result.code === 0
+      ? "ADB 服务已重启"
+      : "ADB 服务启动失败";
+  }
+  return [...new Set(
+    raw
+      .split(/\r?\n/)
+      .map((line) => translateAdbServiceLine(line.trim()))
+      .filter(Boolean),
+  )].join("\n");
 }
 
 export async function saveTextFile(
