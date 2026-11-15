@@ -1,21 +1,22 @@
-name: Publish Draft Release
+name: Update or Publish Draft Release
 
 on:
   push:
     tags:
       - "publish-v*"
+      - "draft-v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag, e.g. v0.1.5"
+        description: "Release tag, e.g. v0.1.6"
         required: true
 
 permissions:
   contents: write
 
 jobs:
-  publish:
-    name: Publish draft release
+  release:
+    name: Update or publish release
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -23,14 +24,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Publish release
+      - name: Update or publish release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           INPUT_TAG: ${{ inputs.tag }}
           REF_NAME: ${{ github.ref_name }}
         shell: bash
         run: |
-          TAG="${INPUT_TAG:-${REF_NAME#publish-}}"
+          MODE="publish"
+          if [[ -n "$INPUT_TAG" ]]; then
+            TAG="$INPUT_TAG"
+          elif [[ "$REF_NAME" == draft-* ]]; then
+            MODE="draft"
+            TAG="${REF_NAME#draft-}"
+          else
+            TAG="${REF_NAME#publish-}"
+          fi
+
           NOTES=".github/release-notes/${TAG}.md"
           if [[ ! -f "$NOTES" ]]; then
             echo "Missing release notes: $NOTES" >&2
@@ -40,8 +50,15 @@ jobs:
             echo "No draft release found for $TAG" >&2
             exit 1
           fi
-          gh release edit "$TAG" \
-            --title "Cat Android Box $TAG" \
-            --notes-file "$NOTES" \
-            --draft=false
+
+          if [[ "$MODE" == "draft" ]]; then
+            gh release edit "$TAG" \
+              --title "Cat Android Box $TAG" \
+              --notes-file "$NOTES"
+          else
+            gh release edit "$TAG" \
+              --title "Cat Android Box $TAG" \
+              --notes-file "$NOTES" \
+              --draft=false
+          fi
           gh release view "$TAG" --json tagName,name,isDraft,url
