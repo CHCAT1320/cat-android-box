@@ -2978,7 +2978,7 @@
         border: 1px solid var(--control-border);
         background: #f9fafb;
         color: #374151;
-        font-family: Consolas, monospace;
+        font-family: var(--font-mono);
         font-size: 11px;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -2995,7 +2995,7 @@
         overflow: auto;
         background: #0f172a;
         color: #e2e8f0;
-        font-family: Consolas, monospace;
+        font-family: var(--font-mono);
         font-size: 12px;
         line-height: 1.5;
         white-space: pre-wrap;
@@ -3016,7 +3016,7 @@
         border: 1px solid var(--control-border);
         background: #fff;
         color: var(--control-text);
-        font-family: Consolas, monospace;
+        font-family: var(--font-mono);
         font-size: 12px;
         line-height: 1.5;
         outline: none;
@@ -3463,7 +3463,7 @@
         border: 1px solid var(--accent);
         background: #fff;
         color: var(--accent);
-        font-family: Consolas, monospace;
+        font-family: var(--font-mono);
         font-size: var(--control-font-sm);
     }
 

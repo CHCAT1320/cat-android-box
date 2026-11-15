@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { useConnectedDevice } from "../composables/useConnectedDevice";
+import CodeEditor from "../components/CodeEditor.vue";
 import {
   checksumFile,
   compressPaths,
@@ -13,12 +15,14 @@ import {
   joinRemotePath,
   listDirectory,
   moveRemotePath,
+  normalizeRemotePath,
   pickDirectory,
   pickFiles,
   pullFile,
   pushFiles,
   readDeviceFile,
   renameRemotePath,
+  runningInTauri,
   writeDeviceFile,
   type FileChecksums,
   type FileEntry,
@@ -48,9 +52,98 @@ const previewLoading = ref(false);
 const previewError = ref("");
 const rootMode = ref(false);
 const previewChecksums = ref<FileChecksums | null>(null);
+const previewChecksumsLoading = ref(false);
 const previewSaving = ref(false);
+const dragActive = ref(false);
+let unlistenDragDrop: (() => void) | null = null;
+
+const TEXT_PREVIEW_EXTENSIONS = new Set([
+  "txt",
+  "log",
+  "json",
+  "jsonl",
+  "xml",
+  "html",
+  "htm",
+  "css",
+  "scss",
+  "less",
+  "js",
+  "mjs",
+  "cjs",
+  "ts",
+  "tsx",
+  "jsx",
+  "vue",
+  "svelte",
+  "py",
+  "java",
+  "kt",
+  "kts",
+  "c",
+  "h",
+  "cpp",
+  "hpp",
+  "cc",
+  "cs",
+  "go",
+  "rs",
+  "rb",
+  "php",
+  "lua",
+  "pl",
+  "r",
+  "swift",
+  "dart",
+  "sh",
+  "bash",
+  "zsh",
+  "bat",
+  "cmd",
+  "ps1",
+  "md",
+  "markdown",
+  "rst",
+  "yml",
+  "yaml",
+  "toml",
+  "ini",
+  "conf",
+  "cfg",
+  "properties",
+  "gradle",
+  "sql",
+  "csv",
+  "tsv",
+  "srt",
+  "vtt",
+  "svg",
+  "pro",
+]);
+const IMAGE_PREVIEW_EXTENSIONS = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+]);
+const TEXT_PREVIEW_LIMIT = 2 * 1024 * 1024;
+const IMAGE_PREVIEW_LIMIT = 6 * 1024 * 1024;
 
 const BOOKMARK_KEY = "cat-android-box-file-bookmarks";
+
+function previewKindFor(name: string): "image" | "text" | "none" {
+  const base = name.split("/").pop() ?? name;
+  const dot = base.lastIndexOf(".");
+  const extension = dot > 0 ? base.slice(dot + 1).toLowerCase() : "";
+  if (IMAGE_PREVIEW_EXTENSIONS.has(extension)) {
+    return "image";
+  }
+  if (TEXT_PREVIEW_EXTENSIONS.has(extension)) {
+    return "text";
+  }
+  return "none";
+}
 
 function loadBookmarks(): string[] {
   try {
@@ -60,6 +153,51 @@ function loadBookmarks(): string[] {
     return [];
   }
 }
+
+async function uploadPaths(paths: string[]) {
+  const target = serial.value;
+  if (!target || paths.length === 0) {
+    return;
+  }
+  error.value = "";
+  working.value = "upload";
+  message.value = `正在上传 ${paths.length} 个文件...`;
+  try {
+    message.value = await pushFiles(target, paths, path.value);
+    await reload();
+  } catch (caught) {
+    error.value = caught instanceof Error ? caught.message : "上传失败";
+  } finally {
+    working.value = null;
+  }
+}
+
+onMounted(async () => {
+  if (!runningInTauri) {
+    return;
+  }
+  try {
+    unlistenDragDrop = await getCurrentWebview().onDragDropEvent(
+      (event) => {
+        if (event.payload.type === "enter" || event.payload.type === "over") {
+          dragActive.value = connected.value;
+        } else if (event.payload.type === "leave") {
+          dragActive.value = false;
+        } else if (event.payload.type === "drop") {
+          dragActive.value = false;
+          void uploadPaths(event.payload.paths);
+        }
+      },
+    );
+  } catch {
+    unlistenDragDrop = null;
+  }
+});
+
+onBeforeUnmount(() => {
+  unlistenDragDrop?.();
+  unlistenDragDrop = null;
+});
 
 function saveBookmarks() {
   localStorage.setItem(BOOKMARK_KEY, JSON.stringify(bookmarks.value));
@@ -126,8 +264,9 @@ async function reload() {
 }
 
 async function openPath(next: string) {
-  path.value = next;
-  pathInput.value = next;
+  const normalized = normalizeRemotePath(next);
+  path.value = normalized;
+  pathInput.value = normalized;
   selected.value = new Set();
   await reload();
 }
@@ -157,24 +296,14 @@ function goUp() {
 }
 
 async function upload() {
-  const target = serial.value;
-  if (!target) {
+  if (!serial.value) {
     return;
   }
   const paths = await pickFiles("选择要上传的文件", []);
   if (!paths || paths.length === 0) {
     return;
   }
-  working.value = "upload";
-  error.value = "";
-  try {
-    message.value = await pushFiles(target, paths, path.value);
-    await reload();
-  } catch (caught) {
-    error.value = caught instanceof Error ? caught.message : "上传失败";
-  } finally {
-    working.value = null;
-  }
+  await uploadPaths(paths);
 }
 
 async function batchUpload() {
@@ -458,14 +587,37 @@ async function openPreview(entry: FileEntry) {
   previewText.value = "";
   previewError.value = "";
   previewChecksums.value = null;
+  previewChecksumsLoading.value = false;
+  previewLoading.value = false;
+
+  const requestedPath = entry.path;
+  const kind = previewKindFor(entry.name);
+  if (kind === "none") {
+    previewKind.value = "none";
+    previewError.value =
+      "该文件类型不支持在线预览，可下载后查看，或点击“校验”获取哈希。";
+    return;
+  }
+
+  const limit =
+    kind === "image" ? IMAGE_PREVIEW_LIMIT : TEXT_PREVIEW_LIMIT;
+  if (entry.size > limit) {
+    previewKind.value = "none";
+    previewError.value = `文件较大（${formatBytes(entry.size)}），已跳过预览，可下载后查看或点击“校验”。`;
+    return;
+  }
+
   previewLoading.value = true;
   try {
     const result = await readDeviceFile(
       target,
       entry.path,
-      8 * 1024 * 1024,
+      limit,
       rootMode.value,
     );
+    if (previewEntry.value?.path !== requestedPath) {
+      return;
+    }
     if (result.mime.startsWith("image/")) {
       previewKind.value = "image";
       previewImage.value = `data:${result.mime};base64,${result.data}`;
@@ -477,10 +629,14 @@ async function openPreview(entry: FileEntry) {
       previewText.value = new TextDecoder().decode(bytes);
     }
   } catch (caught) {
-    previewError.value =
-      caught instanceof Error ? caught.message : "预览失败";
+    if (previewEntry.value?.path === requestedPath) {
+      previewError.value =
+        caught instanceof Error ? caught.message : "预览失败";
+    }
   } finally {
-    previewLoading.value = false;
+    if (previewEntry.value?.path === requestedPath) {
+      previewLoading.value = false;
+    }
   }
 }
 
@@ -496,19 +652,30 @@ function closePreview() {
 async function loadPreviewChecksums() {
   const target = serial.value;
   const entry = previewEntry.value;
-  if (!target || !entry) {
+  if (!target || !entry || previewChecksumsLoading.value) {
     return;
   }
+  const requestedPath = entry.path;
   previewError.value = "";
+  previewChecksumsLoading.value = true;
   try {
-    previewChecksums.value = await checksumFile(
+    const checksums = await checksumFile(
       target,
       entry.path,
       rootMode.value,
     );
+    if (previewEntry.value?.path === requestedPath) {
+      previewChecksums.value = checksums;
+    }
   } catch (caught) {
-    previewError.value =
-      caught instanceof Error ? caught.message : "校验失败";
+    if (previewEntry.value?.path === requestedPath) {
+      previewError.value =
+        caught instanceof Error ? caught.message : "校验失败";
+    }
+  } finally {
+    if (previewEntry.value?.path === requestedPath) {
+      previewChecksumsLoading.value = false;
+    }
   }
 }
 
@@ -600,7 +767,13 @@ async function extractFile(entry: FileEntry) {
       <button @click="submitPath">前往</button>
       <button :disabled="!connected || listing" @click="reload">刷新</button>
       <button :disabled="!connected" @click="makeDirectory">新建文件夹</button>
-      <button :disabled="!connected" @click="upload">上传文件</button>
+      <button
+        :disabled="!connected"
+        title="也可以把文件直接拖拽到窗口上传"
+        @click="upload"
+      >
+        上传文件
+      </button>
       <button :disabled="onlineDevices.length === 0" @click="batchUpload">
         批量上传
       </button>
@@ -757,11 +930,11 @@ async function extractFile(entry: FileEntry) {
           class="preview-image"
           alt="文件预览"
         />
-        <textarea
+        <CodeEditor
           v-if="previewKind === 'text'"
           v-model="previewText"
-          class="preview-editor"
-        ></textarea>
+          :filename="previewEntry?.name ?? ''"
+        />
         <div v-if="previewChecksums" class="checksum-box">
           <p>MD5: {{ previewChecksums.md5 }}</p>
           <p>SHA-256: {{ previewChecksums.sha256 }}</p>
@@ -778,12 +951,20 @@ async function extractFile(entry: FileEntry) {
           <button
             v-if="previewEntry"
             class="dialog-cancel"
+            :disabled="previewChecksumsLoading"
             @click="loadPreviewChecksums"
           >
-            校验
+            {{ previewChecksumsLoading ? "校验中..." : "校验" }}
           </button>
           <button class="dialog-confirm" @click="closePreview">关闭</button>
         </div>
+      </div>
+    </div>
+
+    <div v-if="dragActive" class="drop-overlay">
+      <div class="drop-card">
+        <strong>松开鼠标上传到设备</strong>
+        <span>{{ path }}</span>
       </div>
     </div>
   </section>
@@ -854,7 +1035,7 @@ async function extractFile(entry: FileEntry) {
     border: 1px solid var(--control-border);
     background: #fff;
     color: var(--control-text);
-    font-family: Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: var(--control-font);
     outline: none;
   }
@@ -886,7 +1067,7 @@ async function extractFile(entry: FileEntry) {
     padding: 10px 12px;
     border: 1px solid #e5e7eb;
     background: #f9fafb;
-    font-family: Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-all;
@@ -1003,7 +1184,7 @@ async function extractFile(entry: FileEntry) {
     border: 1px solid var(--control-border);
     background: #f9fafb;
     color: #374151;
-    font-family: Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1094,24 +1275,33 @@ async function extractFile(entry: FileEntry) {
     margin: 0 auto;
     object-fit: contain;
   }
-  .preview-editor {
-    box-sizing: border-box;
-    width: 100%;
-    min-height: 240px;
-    max-height: 66vh;
-    margin: 0;
-    padding: 10px;
-    overflow: auto;
-    border: 1px solid #334155;
-    background: #0f172a;
-    color: #e2e8f0;
-    font-family: Consolas, monospace;
-    font-size: 12px;
-    line-height: 1.5;
-    text-align: left;
-    white-space: pre-wrap;
+  .drop-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 200;
+    display: grid;
+    place-items: center;
+    background: rgba(15, 23, 42, 0.55);
+    pointer-events: none;
+  }
+  .drop-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    padding: 28px 40px;
+    border: 2px dashed var(--accent);
+    background: #fff;
+    color: var(--control-text);
+    text-align: center;
+  }
+  .drop-card strong {
+    color: var(--accent);
+    font-size: 18px;
+  }
+  .drop-card span {
+    font-family: var(--font-mono);
+    font-size: 13px;
     word-break: break-all;
-    resize: vertical;
   }
   .checksum-box {
     margin-top: 10px;
@@ -1119,7 +1309,7 @@ async function extractFile(entry: FileEntry) {
     border: 1px solid #e5e7eb;
     background: #f9fafb;
     text-align: left;
-    font-family: Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 11px;
     word-break: break-all;
   }

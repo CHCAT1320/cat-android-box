@@ -970,10 +970,11 @@ fn read_device_file_blocking(
     } else {
         format!("stat -c %s {quoted}")
     };
-    let cat_command = if root {
-        format!("su -c \"cat {quoted}\"")
+    // 即使 stat 失败，也只读取 limit + 1 字节，避免大文件占满内存
+    let read_command = if root {
+        format!("su -c \"head -c {} {quoted}\"", limit + 1)
     } else {
-        format!("cat {quoted}")
+        format!("head -c {} {quoted}", limit + 1)
     };
 
     let mut stat = build_command(adb.clone());
@@ -994,9 +995,9 @@ fn read_device_file_blocking(
     }
 
     let mut command = build_command(adb);
-    command.args(["-s", serial, "exec-out", &cat_command]);
+    command.args(["-s", serial, "exec-out", &read_command]);
     let output = run_command(command, Duration::from_secs(60))?;
-    if output.code != Some(0) || output.stdout.is_empty() {
+    if output.code != Some(0) {
         let message = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if message.is_empty() {
             "读取文件失败".to_string()
@@ -1006,6 +1007,12 @@ fn read_device_file_blocking(
     }
 
     let bytes = output.stdout;
+    if bytes.len() as u64 > limit {
+        return Err(format!(
+            "文件过大（超过 {}），请先下载到电脑查看",
+            format_bytes(limit)
+        ));
+    }
     let size = bytes.len() as u64;
     let mime = if bytes.starts_with(&[0x89, 0x50, 0x4E, 0x47]) {
         "image/png"

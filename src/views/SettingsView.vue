@@ -319,7 +319,7 @@ async function openReleases() {
   .env-result p {
     margin: 4px 0;
     color: #374151;
-    font-family: Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-all;

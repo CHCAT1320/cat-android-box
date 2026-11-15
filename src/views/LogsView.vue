@@ -504,7 +504,7 @@ window.addEventListener("pagehide", handlePageHide);
     border: 1px solid #1f2937;
     background: #0f172a;
     color: #e2e8f0;
-    font-family: Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     line-height: 1.5;
   }

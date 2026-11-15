@@ -332,6 +332,32 @@ export function joinRemotePath(directory: string, name: string): string {
     : `${directory}/${name}`;
 }
 
+// 归一化远端路径：去掉空段和 . 段，避免出现 /dir/. 这类被 adb 当成文件名的情况
+export function normalizeRemotePath(path: string): string {
+  const trimmed = path.trim();
+  const absolute = trimmed.startsWith("/");
+  const parts: string[] = [];
+  for (const part of trimmed.split("/")) {
+    if (part === "" || part === ".") {
+      continue;
+    }
+    if (part === "..") {
+      if (parts.length > 0 && parts[parts.length - 1] !== "..") {
+        parts.pop();
+      } else if (!absolute) {
+        parts.push(part);
+      }
+      continue;
+    }
+    parts.push(part);
+  }
+  const joined = parts.join("/");
+  if (absolute) {
+    return `/${joined}`;
+  }
+  return joined === "" ? "." : joined;
+}
+
 async function readError(response: Response, fallback: string): Promise<string> {
   try {
     const data = (await response.json()) as { error?: string };
@@ -623,11 +649,8 @@ export async function pushFiles(
   paths: string[],
   remoteDirectory: string,
 ): Promise<string> {
-  const result = await runChecked(serial, [
-    "push",
-    ...paths,
-    remoteDirectory,
-  ]);
+  const target = normalizeRemotePath(remoteDirectory);
+  const result = await runChecked(serial, ["push", ...paths, target]);
   return result.stdout.trim() || "上传完成";
 }
 
@@ -635,8 +658,9 @@ export function parseLsLine(
   line: string,
   directory: string,
 ): FileEntry | null {
+  // 权限位可能包含 setuid/setgid/sticky（s/S/t/T），以及 ACL 标记（+/ .）
   const match = line.match(
-    /^([dl-])[rwx-]{9}\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(.+)$/,
+    /^([dlbcps-])[rwxstST-]{9}[+.]?\s+\d+\s+\S+\s+\S+\s+(\d+)\s+(.+)$/,
   );
   if (!match) {
     return null;

@@ -960,7 +960,7 @@ async function exportApk(app: AppEntry) {
     padding: 10px 12px;
     border: 1px solid #e5e7eb;
     background: #f9fafb;
-    font-family: Consolas, monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     white-space: pre-wrap;
     word-break: break-all;
