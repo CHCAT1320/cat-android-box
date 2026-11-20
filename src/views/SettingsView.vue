@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref, shallowRef } from "vue";
+import type { Update } from "@tauri-apps/plugin-updater";
+import DOMPurify from "dompurify";
+import { marked } from "marked";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { confirmDialog } from "../services/dialogs";
 import { getDeviceStatus, getToolVersions, pickDirectory, restartAdb } from "../services/adb";
@@ -30,13 +33,78 @@ async function restartAdbService() {
   }
 }
 
-const updateState = ref<"idle" | "checking" | "current" | "found" | "error">(
-  "idle",
-);
+const updateState = ref<
+  "idle" | "checking" | "current" | "found" | "installing" | "installed" | "error"
+>("idle");
 const updateMessage = ref("");
+const updateNotes = ref("");
+const updateNotesError = ref("");
+const availableUpdate = shallowRef<Update | null>(null);
+
+function renderMarkdown(value: string): string {
+  if (value.trim() === "") {
+    return "";
+  }
+  const html = marked.parse(value, {
+    async: false,
+    gfm: true,
+    breaks: false,
+  });
+  return DOMPurify.sanitize(html as string);
+}
+
+const renderedUpdateNotes = computed(() =>
+  renderMarkdown(updateNotes.value),
+);
+
+const currentNotes = ref("");
+const currentNotesError = ref("");
+const currentNotesLoading = ref(false);
+const showCurrentNotes = ref(false);
+let currentNotesLoaded = false;
+
+const renderedCurrentNotes = computed(() =>
+  renderMarkdown(currentNotes.value),
+);
+
+async function toggleCurrentNotes() {
+  showCurrentNotes.value = !showCurrentNotes.value;
+  if (!showCurrentNotes.value) {
+    return;
+  }
+  if (currentNotesLoaded && currentNotes.value !== "") {
+    return;
+  }
+  currentNotesLoading.value = true;
+  currentNotesError.value = "";
+  const notes = await fetchReleaseNotes(version);
+  currentNotes.value = notes;
+  currentNotesLoaded = true;
+  if (notes === "") {
+    currentNotesError.value = "未能获取当前版本的更新说明。";
+  }
+  currentNotesLoading.value = false;
+}
 
 const GITHUB_RELEASES =
   "https://github.com/CHCAT1320/cat-android-box/releases";
+const RELEASE_NOTES_BASE =
+  "https://raw.githubusercontent.com/CHCAT1320/cat-android-box/master/.github/release-notes";
+
+async function fetchReleaseNotes(version: string): Promise<string> {
+  try {
+    const response = await fetch(
+      `${RELEASE_NOTES_BASE}/v${version.replace(/^v/, "")}.md`,
+      { cache: "no-store" },
+    );
+    if (response.ok) {
+      return (await response.text()).trim();
+    }
+  } catch {
+    // 网络不可用时由调用方显示兜底提示
+  }
+  return "";
+}
 
 async function chooseDirectory() {
   const picked = await pickDirectory("选择默认下载目录");
@@ -90,15 +158,21 @@ async function checkEnvironment() {
 async function checkUpdate() {
   updateState.value = "checking";
   updateMessage.value = "";
+  updateNotes.value = "";
+  updateNotesError.value = "";
+  availableUpdate.value = null;
   try {
     const { check } = await import("@tauri-apps/plugin-updater");
     const update = await check();
     if (update) {
+      availableUpdate.value = update;
       updateState.value = "found";
-      updateMessage.value = `发现新版本 ${update.version}，正在下载并安装...`;
-      await update.downloadAndInstall();
-      updateState.value = "found";
-      updateMessage.value = `新版本 ${update.version} 已安装，请重新启动应用。`;
+      updateMessage.value = `发现新版本 v${update.version}（当前 v${version}）`;
+      updateNotes.value = await fetchReleaseNotes(update.version);
+      if (updateNotes.value === "") {
+        updateNotesError.value =
+          "未能获取该版本的更新说明，请点击“打开发布页”查看。";
+      }
     } else {
       updateState.value = "current";
       updateMessage.value = `当前已是最新版本 v${version}。`;
@@ -115,6 +189,29 @@ async function checkUpdate() {
       /404|valid release JSON|not found|failed to fetch/i.test(detail)
         ? "当前没有可用的已发布更新（latest.json 不存在），请先发布 GitHub Release。"
         : `检查更新失败：${detail}`;
+  }
+}
+
+async function installUpdate() {
+  const update = availableUpdate.value;
+  if (!update) {
+    return;
+  }
+  updateState.value = "installing";
+  updateMessage.value = `正在下载并安装 v${update.version}...`;
+  try {
+    await update.downloadAndInstall();
+    updateState.value = "installed";
+    updateMessage.value = `新版本 v${update.version} 已安装，请重新启动应用。`;
+  } catch (caught) {
+    updateState.value = "error";
+    const detail =
+      typeof caught === "string"
+        ? caught
+        : caught instanceof Error
+          ? caught.message
+          : String(caught ?? "未知错误");
+    updateMessage.value = `安装更新失败：${detail}`;
   }
 }
 
@@ -208,10 +305,35 @@ async function openReleases() {
         latest.json 和签名文件。
       </p>
       <div class="row">
-        <button :disabled="updateState === 'checking'" @click="checkUpdate">
+        <button
+          :disabled="
+            updateState === 'checking' || updateState === 'installing'
+          "
+          @click="checkUpdate"
+        >
           {{ updateState === "checking" ? "检查中..." : "检查更新" }}
         </button>
+        <button
+          v-if="availableUpdate && updateState !== 'installed'"
+          :disabled="updateState === 'installing'"
+          @click="installUpdate"
+        >
+          {{ updateState === "installing" ? "安装中..." : "下载并安装" }}
+        </button>
         <button class="secondary" @click="openReleases">打开发布页</button>
+        <button
+          class="secondary"
+          :disabled="currentNotesLoading"
+          @click="toggleCurrentNotes"
+        >
+          {{
+            currentNotesLoading
+              ? "读取中..."
+              : showCurrentNotes
+                ? "收起本版更新"
+                : "本版更新内容"
+          }}
+        </button>
       </div>
       <p
         v-if="updateMessage"
@@ -220,6 +342,30 @@ async function openReleases() {
       >
         {{ updateMessage }}
       </p>
+      <div v-if="updateNotes" class="update-notes-box">
+        <h3>更新内容</h3>
+        <div
+          class="update-notes markdown-body"
+          v-html="renderedUpdateNotes"
+        ></div>
+      </div>
+      <p v-else-if="updateNotesError" class="update-notes-error">
+        {{ updateNotesError }}
+      </p>
+      <div v-if="showCurrentNotes" class="update-notes-box">
+        <h3>v{{ version }} 更新内容</h3>
+        <p v-if="currentNotesLoading" class="update-notes-error">
+          正在读取...
+        </p>
+        <div
+          v-else-if="currentNotes"
+          class="update-notes markdown-body"
+          v-html="renderedCurrentNotes"
+        ></div>
+        <p v-else-if="currentNotesError" class="update-notes-error">
+          {{ currentNotesError }}
+        </p>
+      </div>
     </div>
   </section>
 </template>
@@ -375,5 +521,95 @@ async function openReleases() {
   }
   .update-message.error {
     color: #dc2626;
+  }
+  .update-notes-box {
+    margin-top: 12px;
+  }
+  .update-notes-box h3 {
+    margin: 0 0 6px;
+    color: var(--accent);
+    font-size: 14px;
+  }
+  .update-notes {
+    max-height: 360px;
+    margin: 0;
+    padding: 12px 14px;
+    overflow: auto;
+    border: 1px solid #e5e7eb;
+    background: #f8fafc;
+    color: #374151;
+    font-family: inherit;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: normal;
+    word-break: break-word;
+  }
+  .update-notes :deep(h1),
+  .update-notes :deep(h2),
+  .update-notes :deep(h3) {
+    margin: 14px 0 6px;
+    color: var(--accent);
+    line-height: 1.4;
+  }
+  .update-notes :deep(h1) {
+    font-size: 16px;
+  }
+  .update-notes :deep(h2) {
+    font-size: 15px;
+  }
+  .update-notes :deep(h3) {
+    font-size: 14px;
+  }
+  .update-notes :deep(p) {
+    margin: 6px 0;
+  }
+  .update-notes :deep(ul) {
+    margin: 6px 0;
+    padding-left: 22px;
+  }
+  .update-notes :deep(li) {
+    margin: 3px 0;
+  }
+  .update-notes :deep(code) {
+    padding: 1px 5px;
+    border: 1px solid #e5e7eb;
+    background: #f1f5f9;
+    font-family: var(--font-mono);
+    font-size: 12px;
+  }
+  .update-notes :deep(pre) {
+    padding: 10px;
+    overflow: auto;
+    background: #0f172a;
+    color: #e2e8f0;
+  }
+  .update-notes :deep(pre code) {
+    padding: 0;
+    border: none;
+    background: none;
+    color: inherit;
+  }
+  .update-notes :deep(blockquote) {
+    margin: 8px 0;
+    padding: 6px 12px;
+    border-left: 3px solid var(--accent);
+    background: #f8fafc;
+    color: #6b7280;
+  }
+  .update-notes :deep(a) {
+    color: var(--accent);
+  }
+  .update-notes :deep(hr) {
+    margin: 12px 0;
+    border: 0;
+    border-top: 1px solid #e5e7eb;
+  }
+  .update-notes :deep(strong) {
+    color: #111827;
+  }
+  .update-notes-error {
+    margin: 10px 0 0;
+    color: #b45309;
+    font-size: 13px;
   }
 </style>
