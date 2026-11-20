@@ -41,6 +41,11 @@ function load(): AppSettings {
 
 export const settings = reactive<AppSettings>(load());
 
+// 恢复主题、下载目录和 ADB 扫描地址，不清理书签/历史/脚本/收藏
+export function resetSettings() {
+  Object.assign(settings, defaults);
+}
+
 watch(
   settings,
   (value) => {

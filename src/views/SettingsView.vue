@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref } from "vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { confirmDialog } from "../services/dialogs";
 import { getDeviceStatus, getToolVersions, pickDirectory, restartAdb } from "../services/adb";
-import { ACCENT_COLORS, settings } from "../services/settings";
+import { ACCENT_COLORS, resetSettings, settings } from "../services/settings";
 import { version } from "../../package.json";
 
 const checkingEnv = ref(false);
@@ -12,6 +13,7 @@ const envDevices = ref("");
 const envError = ref("");
 const restartingAdb = ref(false);
 const adbMessage = ref("");
+const settingsMessage = ref("");
 
 async function restartAdbService() {
   restartingAdb.value = true;
@@ -45,6 +47,22 @@ async function chooseDirectory() {
 
 function chooseAccent(value: string) {
   settings.accent = value;
+}
+
+async function clearAllSettings() {
+  settingsMessage.value = "";
+  const confirmed = await confirmDialog({
+    title: "清除所有设置",
+    message:
+      "将主题色、默认下载目录和 ADB 扫描地址恢复为默认值。\n书签、命令历史、自定义脚本和收藏不会被删除。",
+    confirmText: "清除",
+    danger: true,
+  });
+  if (!confirmed) {
+    return;
+  }
+  resetSettings();
+  settingsMessage.value = "所有设置已恢复默认值";
 }
 
 async function checkEnvironment() {
@@ -172,6 +190,15 @@ async function openReleases() {
         <p><span>fastboot</span>{{ envFastboot }}</p>
         <p><span>设备</span>{{ envDevices }}</p>
       </div>
+    </div>
+
+    <div class="card">
+      <h2>重置</h2>
+      <p class="hint">
+        将主题色、默认下载目录和 ADB 扫描地址恢复为默认值。书签、命令历史、自定义脚本和收藏不会被删除。
+      </p>
+      <button class="danger" @click="clearAllSettings">清除所有设置</button>
+      <p v-if="settingsMessage" class="adb-message">{{ settingsMessage }}</p>
     </div>
 
     <div class="card">
@@ -304,6 +331,13 @@ async function openReleases() {
   .secondary {
     border-color: #d1d5db !important;
     color: #374151 !important;
+  }
+  .card > button.danger {
+    border-color: #dc2626;
+    color: #dc2626;
+  }
+  .card > button.danger:hover:not(:disabled) {
+    background: #fef2f2;
   }
   .adb-message {
     margin: 10px 0 0;
