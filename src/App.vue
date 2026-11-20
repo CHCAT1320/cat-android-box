@@ -147,7 +147,8 @@ onBeforeUnmount(() => {
 }
 
 body {
-  font-family: "JetBrains Mono", "Noto Sans SC", "Microsoft YaHei UI", sans-serif;
+  font-family: "JetBrains Mono", "Noto Sans SC", "Noto Color Emoji",
+    "Microsoft YaHei UI", sans-serif;
   margin: 0;
   --page-gutter: clamp(16px, 2vw, 32px);
   --control-height: 34px;
