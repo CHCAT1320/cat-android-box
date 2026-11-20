@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
+import AprilFoolsEgg from "./components/AprilFoolsEgg.vue";
 import DialogHost from "./components/DialogHost.vue";
 import { resolveAccent, settings } from "./services/settings";
 
@@ -104,6 +105,7 @@ onBeforeUnmount(() => {
       </RouterView>
     </main>
     <DialogHost />
+    <AprilFoolsEgg />
   </div>
 </template>
 

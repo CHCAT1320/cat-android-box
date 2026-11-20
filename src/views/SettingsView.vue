@@ -122,7 +122,7 @@ async function clearAllSettings() {
   const confirmed = await confirmDialog({
     title: "清除所有设置",
     message:
-      "将主题色、默认下载目录和 ADB 扫描地址恢复为默认值。\n书签、命令历史、自定义脚本和收藏不会被删除。",
+      "将主题色、默认下载目录和 ADB 扫描地址恢复为默认值，并清除今日愚人节彩蛋的屏蔽状态。\n书签、命令历史、自定义脚本和收藏不会被删除。",
     confirmText: "清除",
     danger: true,
   });
@@ -292,7 +292,7 @@ async function openReleases() {
     <div class="card">
       <h2>重置</h2>
       <p class="hint">
-        将主题色、默认下载目录和 ADB 扫描地址恢复为默认值。书签、命令历史、自定义脚本和收藏不会被删除。
+        将主题色、默认下载目录和 ADB 扫描地址恢复为默认值，并清除今日愚人节彩蛋的屏蔽状态。书签、命令历史、自定义脚本和收藏不会被删除。
       </p>
       <button class="danger" @click="clearAllSettings">清除所有设置</button>
       <p v-if="settingsMessage" class="adb-message">{{ settingsMessage }}</p>

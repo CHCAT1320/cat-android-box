@@ -15,6 +15,8 @@ export interface AppSettings {
 }
 
 const STORAGE_KEY = "cat-android-box-settings";
+export const APRIL_FOOLS_OPTOUT_KEY =
+  "cat-android-box-april-fools-optout";
 
 const defaults: AppSettings = {
   accent: "random",
@@ -41,9 +43,14 @@ function load(): AppSettings {
 
 export const settings = reactive<AppSettings>(load());
 
-// 恢复主题、下载目录和 ADB 扫描地址，不清理书签/历史/脚本/收藏
+// 恢复主题、下载目录和 ADB 扫描地址，并清除今日愚人节屏蔽
 export function resetSettings() {
   Object.assign(settings, defaults);
+  try {
+    localStorage.removeItem(APRIL_FOOLS_OPTOUT_KEY);
+  } catch {
+    // 忽略存储失败
+  }
 }
 
 watch(
